@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import price, photo %}
+{% block title %}Editor de encarte{% endblock %}
+
+{% set sel = selected if selected is defined and selected else none %}
+{% set sel_id = sel.car.id if sel else none %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Editor de encarte</h1>
+    <p class="muted">Escolha um carro, ajuste as fotos e baixe o post pronto (11 imagens 1080×1350 + legenda).</p>
+  </div>
+</section>
+
+<div class="editor">
+  {# ---------- seletor de carro ---------- #}
+  <aside class="picker card">
+    <details id="picker-details" {{ 'open' if not sel }}>
+      <summary class="picker-summary">
+        <span>{% if sel %}Trocar carro{% else %}Escolha um carro{% endif %}</span>
+        <span class="pill">{{ cars | length }}</span>
+      </summary>
+      <div class="picker-search">
+        <input type="search" id="picker-filter" class="input" placeholder="Buscar por marca, modelo…" aria-label="Buscar carro">
+      </div>
+      <ul class="picker-list">
+        {% for car in cars %}
+        <li data-name="{{ car.name | lower }}">
+          <a class="picker-item {{ 'active' if car.id == sel_id }}" href="/editor/{{ car.id }}" data-loading>
+            {{ photo(car, 'picker-thumb') }}
+            <span class="picker-info">
+              <span class="picker-name">{{ car.name }}</span>
+              <span class="picker-price">{{ price(car.price_cents) }}</span>
+            </span>
+          </a>
+        </li>
+        {% else %}
+        <li class="muted small picker-none">Nenhum carro ativo no estoque.</li>
+        {% endfor %}
+        <li class="muted small picker-none" id="picker-empty" hidden>Nenhum carro encontrado.</li>
+      </ul>
+    </details>
+  </aside>
+
+  {# ---------- área de trabalho ---------- #}
+  <section class="workspace">
+    {% if error is defined and error %}
+      <div class="card error-box">
+        <p class="error-title">Não foi possível carregar os dados do anúncio.</p>
+        <p class="muted small">{{ error }}</p>
+        {% if sel_id or request is defined %}
+        <a class="btn btn-primary" href="{{ request.url.path if request is defined else '/editor' }}">↻ Tentar de novo</a>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if sel %}
+      {% set d = sel.detail %}
+      <div class="card car-summary">
+        {{ photo(sel.car, 'summary-img') }}
+        <div class="summary-body">
+          <p class="summary-brand">{{ d.brand if d and d.brand else '' }}</p>
+          <h2 class="summary-model">{{ d.model if d and d.model else sel.car.name }}</h2>
+          {% if d and d.version %}<p class="summary-version">{{ d.version }}</p>{% endif %}
+          <div class="summary-tags">
+            {% if d and d.km is not none %}<span class="tag"><b>KM</b> {{ '{:,}'.format(d.km) | replace(',', '.') }}</span>{% endif %}
+            {% if d and (d.year_fab or d.year_model) %}
+              <span class="tag"><b>ANO</b> {{ '%02d' | format(d.year_fab % 100) if d.year_fab else '--' }}/{{ '%02d' | format(d.year_model % 100) if d.year_model else '--' }}</span>
+            {% endif %}
+            <span class="tag tag-price">{{ price(d.price_cents if d else sel.car.price_cents) }}</span>
+          </div>
+        </div>
+        <a class="btn btn-ghost btn-sm summary-link" href="{{ sel.car.url }}" target="_blank" rel="noopener">Anúncio ↗</a>
+      </div>
+
+      {% if not sel.photos %}
+      <div class="card warn-box" role="status">
+        <p class="warn-title">📷 Anúncio sem fotos no site — não dá para gerar o encarte.</p>
+        <p class="muted small">Assim que as fotos forem publicadas no anúncio, recarregue esta página. A legenda abaixo já pode ser usada.</p>
+      </div>
+      {% else %}
+      {# fotos escolhidas / disponíveis #}
+      <div class="card panel">
+        <div class="panel-head">
+          <h2 class="section-title">Fotos do post <span class="pill" id="chosen-count">0/11</span></h2>
+          <button type="button" class="btn btn-ghost btn-sm" id="reset-photos">↺ Ordem do site</button>
+        </div>
+        <p class="muted small">A 1ª foto vira a <b>capa</b>. Arraste para reordenar ou use as setas. Máximo de 11 fotos.</p>
+        <ol class="photo-strip" id="chosen"></ol>
+
+        <details class="others" id="others-wrap">
+          <summary><span>Outras fotos do anúncio</span> <span class="pill" id="others-count">0</span></summary>
+          <p class="muted small">Clique em uma foto para incluí-la no post.</p>
+          <ul class="photo-strip photo-strip-others" id="others"></ul>
+        </details>
+      </div>
+
+      {# prévia #}
+      <div class="card panel">
+        <div class="panel-head">
+          <h2 class="section-title">Prévia <span class="muted small" id="preview-status"></span></h2>
+          <a class="btn btn-primary" id="zip-link" href="/encarte/{{ sel_id }}.zip" download>⬇ Baixar ZIP</a>
+        </div>
+        <div class="slides" id="slides"></div>
+      </div>
+
+      {% endif %}
+
+      {# legenda #}
+      <div class="card panel">
+        <div class="panel-head">
+          <h2 class="section-title">Legenda <span class="char-count" id="caption-count" aria-live="polite"></span></h2>
+          <div class="actions">
+            <a class="btn btn-ghost btn-sm" href="/encarte/{{ sel_id }}/caption.txt" download>⬇ .txt</a>
+            <button type="button" class="btn btn-accent btn-sm" id="copy-caption">⧉ Copiar</button>
+          </div>
+        </div>
+        <textarea id="caption" class="caption" rows="22" spellcheck="false">{{ sel.caption or '' }}</textarea>
+      </div>
+
+      <script>
+        window.ENCARTE = {
+          carId: {{ sel_id | tojson }},
+          photos: [{% for p in sel.photos %}{"index": {{ p.index | int }}, "url": {{ p.url | tojson }}}{{ "," if not loop.last }}{% endfor %}]
+        };
+      </script>
+    {% elif not (error is defined and error) %}
+      <div class="empty editor-empty">
+        <div class="empty-icon">🖼</div>
+        <p><strong>Escolha um carro na lista</strong></p>
+        <p class="muted">Os dados e as fotos são buscados no anúncio do site e o encarte é montado automaticamente.</p>
+      </div>
+    {% endif %}
+  </section>
+</div>
+
+<div class="loading-overlay" id="loading-overlay" hidden>
+  <div class="spinner"></div>
+  <p>Buscando dados do anúncio…</p>
+</div>
+
+<script>
+(function () {
+  // ----- seletor: busca, estado aberto no desktop, overlay de carregamento -----
+  var details = document.getElementById('picker-details');
+  if (window.matchMedia('(min-width: 961px)').matches) details.open = true;
+
+  var filter = document.getElementById('picker-filter');
+  var pickerEmpty = document.getElementById('picker-empty');
+  filter.addEventListener('input', function () {
+    var q = filter.value.trim().toLowerCase(), shown = 0;
+    document.querySelectorAll('.picker-list li[data-name]').forEach(function (li) {
+      var ok = !q || li.dataset.name.indexOf(q) !== -1;
+      li.hidden = !ok; if (ok) shown++;
+    });
+    pickerEmpty.hidden = shown > 0 || !q;
+  });
+  document.querySelectorAll('[data-loading]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+      document.getElementById('loading-overlay').hidden = false;
+    });
+  });
+  window.addEventListener('pageshow', function () {
+    document.getElementById('loading-overlay').hidden = true;
+  });
+
+  var cfg = window.ENCARTE;
+  if (!cfg) return;
+
+  // ----- estado das fotos -----
+  var MAX = 11;
+  var urlOf = {};
+  cfg.photos.forEach(function (p) { urlOf[p.index] = p.url; });
+  var siteOrder = cfg.photos.map(function (p) { return p.index; });
+  var chosen = siteOrder.slice(0, MAX);
+
+  var chosenEl = document.getElementById('chosen');
+  var othersEl = document.getElementById('others');
+  var slidesEl = document.getElementById('slides');
+  var zipLink = document.getElementById('zip-link');
+  var status = document.getElementById('preview-status');
+  var dragFrom = null;
+
+  function qs() { return 'photos=' + chosen.join(','); }
+  function pad(n) { return (n < 9 ? '0' : '') + (n + 1); }
+
+  function tile(idx, pos) {
+    var li = document.createElement('li');
+    li.className = 'photo-tile' + (pos === 0 ? ' is-cover' : '');
+    var img = document.createElement('img');
+    img.src = urlOf[idx]; img.alt = 'Foto ' + (idx + 1); img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer'; img.draggable = false;
+    li.appendChild(img);
+    return li;
+  }
+
+  function btn(label, title, fn, disabled) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'tile-btn'; b.textContent = label;
+    b.title = title; b.setAttribute('aria-label', title); b.disabled = !!disabled;
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function move(from, to) {
+    if (to < 0 || to >= chosen.length || from === to) return;
+    var item = chosen.splice(from, 1)[0];
+    chosen.splice(to, 0, item);
+    update();
+  }
+
+  function renderStrips() {
+    chosenEl.innerHTML = '';
+    chosen.forEach(function (idx, pos) {
+      var li = tile(idx, pos);
+      li.draggable = true;
+      li.dataset.pos = pos;
+      var label = document.createElement('span');
+      label.className = 'tile-label';
+      label.textContent = pos === 0 ? 'Capa' : String(pos + 1);
+      li.appendChild(label);
+      var bar = document.createElement('div');
+      bar.className = 'tile-bar';
+      bar.appendChild(btn('◀', 'Mover para a esquerda', function () { move(pos, pos - 1); }, pos === 0));
+      bar.appendChild(btn('✕', 'Remover do post', function () {
+        chosen.splice(pos, 1); update();
+      }, chosen.length <= 1));
+      bar.appendChild(btn('▶', 'Mover para a direita', function () { move(pos, pos + 1); }, pos === chosen.length - 1));
+      li.appendChild(bar);
+
+      li.addEventListener('dragstart', function (e) {
+        dragFrom = pos; li.classList.add('is-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(pos)); } catch (err) {}
+      });
+      li.addEventListener('dragend', function () { li.classList.remove('is-dragging'); dragFrom = null; });
+      li.addEventListener('dragover', function (e) { e.preventDefault(); li.classList.add('is-over'); });
+      li.addEventListener('dragleave', function () { li.classList.remove('is-over'); });
+      li.addEventListener('drop', function (e) {
+        e.preventDefault(); li.classList.remove('is-over');
+        if (dragFrom !== null) move(dragFrom, pos);
+      });
+      chosenEl.appendChild(li);
+    });
+
+    othersEl.innerHTML = '';
+    var others = siteOrder.filter(function (i) { return chosen.indexOf(i) === -1; });
+    var full = chosen.length >= MAX;
+    others.forEach(function (idx) {
+      var li = tile(idx, -1);
+      li.classList.add('is-other');
+      var add = btn('+', full ? 'Post cheio (máx. 11) — remova uma foto antes' : 'Incluir no post', function () {
+        if (chosen.length >= MAX) return;
+        chosen.push(idx); update();
+      }, full);
+      add.classList.add('tile-add');
+      li.appendChild(add);
+      if (!full) li.addEventListener('click', function (e) { if (e.target === li || e.target.tagName === 'IMG') add.click(); });
+      othersEl.appendChild(li);
+    });
+    document.getElementById('chosen-count').textContent = chosen.length + '/' + MAX;
+    document.getElementById('others-count').textContent = others.length;
+    document.getElementById('others-wrap').hidden = others.length === 0;
+  }
+
+  // ----- prévia: fila com no máx. 3 imagens em paralelo (capa primeiro) e retry -----
+  var timer = null;
+  var CONCURRENCY = 3, RETRY_DELAYS = [1000, 3000];
+  var gen = 0, queue = [], active = 0, pending = 0, failed = 0;
+
+  function setStatus() {
+    var parts = [];
+    if (pending > 0) parts.push('gerando ' + pending + ' de ' + chosen.length + '…');
+    if (failed > 0) parts.push(failed + ' com falha');
+    status.textContent = parts.length ? parts.join(' · ') : chosen.length + ' imagens';
+  }
+
+  function pump() {
+    while (active < CONCURRENCY && queue.length) {
+      var job = queue.shift();
+      if (job.gen !== gen) continue;
+      active++;
+      job.run();
+    }
+  }
+
+  // Cada job ocupa um slot só enquanto a requisição está em andamento; na espera
+  // do retry o slot fica livre e o job volta para o início da fila.
+  function makeJob(slide, tryN) {
+    var myGen = gen, n = tryN || 0;
+    return { gen: myGen, run: function () {
+      function release() { if (myGen === gen) active = Math.max(0, active - 1); pump(); }
+      var img = slide.img;
+      img.onload = function () {
+        if (myGen !== gen) return release();
+        slide.fig.classList.remove('is-loading', 'is-retrying');
+        slide.note.textContent = '';
+        pending = Math.max(0, pending - 1); setStatus(); release();
+      };
+      img.onerror = function () {
+        if (myGen !== gen) return release();
+        if (n < RETRY_DELAYS.length) {
+          slide.fig.classList.add('is-retrying');
+          slide.note.textContent = 'tentando de novo (' + (n + 1) + '/' + RETRY_DELAYS.length + ')…';
+          setTimeout(function () {
+            if (myGen !== gen) return;
+            queue.unshift(makeJob(slide, n + 1)); pump();
+          }, RETRY_DELAYS[n]);
+          release();
+          return;
+        }
+        slide.fig.classList.remove('is-loading', 'is-retrying');
+        slide.fig.classList.add('is-error');
+        pending = Math.max(0, pending - 1); failed++; setStatus(); release();
+      };
+      // cache-buster só nas novas tentativas, para não reaproveitar a resposta com erro
+      img.src = slide.src + (n > 0 || slide.manual ? '&_r=' + n + '-' + Date.now() : '');
+    } };
+  }
+
+  function enqueue(slide) {
+    queue.push(makeJob(slide));
+    pump();
+  }
+
+  function renderSlides() {
+    gen++;
+    queue = []; active = 0; failed = 0; pending = chosen.length;
+    var q = qs();
+    zipLink.href = '/encarte/' + cfg.carId + '.zip?' + q;
+    slidesEl.innerHTML = '';
+    chosen.forEach(function (_, n) {
+      var src = '/encarte/' + cfg.carId + '/slide/' + n + '.png?' + q;
+      var fig = document.createElement('figure');
+      fig.className = 'slide is-loading';
+      var frame = document.createElement('div');
+      frame.className = 'slide-frame';
+      var img = document.createElement('img');
+      img.alt = n === 0 ? 'Capa' : 'Imagem ' + (n + 1);
+      var note = document.createElement('span');
+      note.className = 'slide-note';
+      var retry = document.createElement('button');
+      retry.type = 'button'; retry.className = 'btn btn-sm btn-primary slide-retry';
+      retry.textContent = '↻ Tentar de novo';
+      var slide = { fig: fig, img: img, note: note, src: src };
+      retry.addEventListener('click', function () {
+        fig.classList.remove('is-error'); fig.classList.add('is-loading');
+        note.textContent = '';
+        failed = Math.max(0, failed - 1); pending++; setStatus();
+        slide.manual = true;  // clique manual: recomeça com 2 retries e cache-buster
+        enqueue(slide);
+      });
+      var fail = document.createElement('div');
+      fail.className = 'slide-fail';
+      var failMsg = document.createElement('span');
+      failMsg.textContent = 'Falha ao gerar';
+      fail.appendChild(failMsg); fail.appendChild(retry);
+      frame.appendChild(img); frame.appendChild(note); frame.appendChild(fail);
+
+      var cap = document.createElement('figcaption');
+      var name = document.createElement('span');
+      name.textContent = n === 0 ? '01 · Capa' : pad(n);
+      var dl = document.createElement('a');
+      dl.href = src; dl.download = pad(n) + '.png';
+      dl.className = 'btn btn-ghost btn-sm'; dl.textContent = '⬇ Baixar';
+      cap.appendChild(name); cap.appendChild(dl);
+      fig.appendChild(frame); fig.appendChild(cap);
+      slidesEl.appendChild(fig);
+      queue.push(makeJob(slide));   // ordem 0..n: capa primeiro
+    });
+    setStatus();
+    pump();
+  }
+
+  function update() {
+    renderStrips();
+    clearTimeout(timer);
+    status.textContent = 'atualizando…';
+    timer = setTimeout(renderSlides, 450);
+  }
+
+  var resetBtn = document.getElementById('reset-photos');
+  if (resetBtn) resetBtn.addEventListener('click', function () {
+    chosen = siteOrder.slice(0, MAX); update();
+  });
+
+  // ----- legenda -----
+  var LIMIT = 2200;  // limite de caracteres da legenda no Instagram
+  var captionEl = document.getElementById('caption');
+  var countEl = document.getElementById('caption-count');
+  function updateCount() {
+    var n = Array.from(captionEl.value).length;  // conta emojis como 1
+    countEl.textContent = n.toLocaleString('pt-BR') + ' / ' + LIMIT.toLocaleString('pt-BR');
+    countEl.classList.toggle('is-over', n > LIMIT);
+    countEl.title = n > LIMIT ? 'Passou ' + (n - LIMIT) + ' caracteres do limite do Instagram' : 'Limite do Instagram: 2.200 caracteres';
+  }
+  captionEl.addEventListener('input', updateCount);
+  updateCount();
+  var copyBtn = document.getElementById('copy-caption');
+  copyBtn.addEventListener('click', function () {
+    var ta = document.getElementById('caption');
+    function ok() {
+      copyBtn.textContent = '✓ Copiado';
+      setTimeout(function () { copyBtn.textContent = '⧉ Copiar'; }, 1800);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(ta.value).then(ok, function () { ta.select(); document.execCommand('copy'); ok(); });
+    } else {
+      ta.select(); document.execCommand('copy'); ok();
+    }
+  });
+
+  // Sem fotos: não há prévia nem ZIP (as rotas devolvem 422).
+  if (chosen.length) {
+    renderStrips();
+    renderSlides();
+  }
+})();
+</script>
+{% endblock %}

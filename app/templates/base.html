@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#050a14">
+  <link rel="icon" href="/static/logo.png">
   <title>{% block title %}Painel{% endblock %} · Union Veículos</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
@@ -21,13 +23,14 @@
   <header class="topbar">
     <div class="container topbar-inner">
       <a class="brand" href="/">
-        <span class="brand-mark">U</span>
-        <span class="brand-text">Union Veículos <small>Social Media</small></span>
+        <img class="brand-logo" src="/static/logo-dark.png" alt="Union Veículos" width="166" height="40">
+        <span class="brand-text">Social Media</span>
       </a>
       <nav class="nav">
         {% set path = request.url.path if request is defined else '' %}
         <a href="/" class="{{ 'active' if path == '/' }}">Painel</a>
         <a href="/cars" class="{{ 'active' if path.startswith('/cars') }}">Estoque</a>
+        <a href="/editor" class="{{ 'active' if path.startswith('/editor') }}">Editor</a>
         <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro" title="Alternar tema">
           <span class="icon-sun">☀</span><span class="icon-moon">☾</span>
         </button>

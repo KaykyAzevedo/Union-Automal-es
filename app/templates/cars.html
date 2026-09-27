@@ -42,7 +42,10 @@
       {% elif car.posted %}<span class="pill pill-ok">Postado</span>
       {% else %}<span class="pill pill-warn">Pendente</span>{% endif %}
     </span>
-    <a class="btn btn-ghost btn-sm" href="{{ car.url }}" target="_blank" rel="noopener">Anúncio ↗</a>
+    <span class="car-actions">
+      {% if car.active %}<a class="btn btn-accent btn-sm" href="/editor/{{ car.id }}" title="Gerar encarte">🖼 Gerar encarte</a>{% endif %}
+      <a class="btn btn-ghost btn-sm" href="{{ car.url }}" target="_blank" rel="noopener">Anúncio ↗</a>
+    </span>
   </div>
   {% endfor %}
   <p class="car-empty muted" hidden>Nenhum carro com esse filtro.</p>

@@ -9,7 +9,10 @@
     <p class="ticket-price">{{ price(ticket.car.price_cents) }}</p>
     <p class="muted small">Chegou em {{ when(ticket.created_at) }}</p>
     <div class="ticket-actions">
-      <a class="btn btn-ghost" href="{{ ticket.car.url }}" target="_blank" rel="noopener">Ver anúncio ↗</a>
+      <div class="btn-row">
+        <a class="btn btn-accent" href="/editor/{{ ticket.car.id }}">🖼 Gerar encarte</a>
+        <a class="btn btn-ghost" href="{{ ticket.car.url }}" target="_blank" rel="noopener">Ver anúncio ↗</a>
+      </div>
       <button class="btn btn-success btn-block"
               hx-post="/tickets/{{ ticket.id }}/done"
               hx-target="#ticket-{{ ticket.id }}"

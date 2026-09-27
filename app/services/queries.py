@@ -85,6 +85,16 @@ def all_cars(conn) -> list[Car]:
     return [Car.from_row(r) for r in rows]
 
 
+def get_car(conn, car_id: int) -> Car | None:
+    row = conn.execute(f"SELECT {_CAR_COLS} FROM cars c WHERE c.id = ?", (car_id,)).fetchone()
+    return Car.from_row(row) if row else None
+
+
+def active_cars(conn) -> list[Car]:
+    rows = conn.execute(f"SELECT {_CAR_COLS} FROM cars c WHERE c.active = 1 ORDER BY c.name, c.id")
+    return [Car.from_row(r) for r in rows]
+
+
 def last_check(conn):
     return from_iso(conn.execute("SELECT MAX(finished_at) FROM runs WHERE ok = 1").fetchone()[0])
 

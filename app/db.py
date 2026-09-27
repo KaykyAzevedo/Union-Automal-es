@@ -98,7 +98,10 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     target = str(path) if path is not None else str(db_path())
     if target != ":memory:":
         Path(target).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(target, timeout=30)
+    # check_same_thread=False: o FastAPI abre a dependência get_conn numa thread do
+    # pool e roda o endpoint em outra. Cada conexão continua sendo de UMA requisição,
+    # usada sequencialmente, então é seguro.
+    conn = sqlite3.connect(target, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if target != ":memory:":

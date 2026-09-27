@@ -8,3 +8,4 @@ beautifulsoup4>=4.12
 tzdata>=2024.1
 winotify>=1.1; sys_platform == "win32"
 pytest>=8
+Pillow>=10.4

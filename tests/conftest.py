@@ -46,6 +46,10 @@ def tmp_db(tmp_path, monkeypatch) -> Path:
     """Cada teste usa um SQLite novo (app lê UNION_DB_PATH a cada connect())."""
     path = tmp_path / "union.db"
     monkeypatch.setenv("UNION_DB_PATH", str(path))
+    monkeypatch.setenv("UNION_DATA_DIR", str(tmp_path / "data"))
+    from app.encarte import photos  # cache de fotos fora de data/ real
+
+    monkeypatch.setattr(photos, "CACHE_DIR", tmp_path / "data" / "cache" / "photos")
     db.init_db()
     return path
 

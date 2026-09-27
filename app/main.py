@@ -1,13 +1,17 @@
 """App FastAPI: painel da social media da Union Veículos."""
 from __future__ import annotations
 
+import io
 import logging
 import os
+import re
+import unicodedata
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -15,6 +19,9 @@ from . import db
 from .services import queries
 from .services.formatting import brl, dt
 from .services.jobs import poll_job, price_check_job
+from .encarte import source as encarte_source
+from .encarte.caption import build_caption
+from .encarte.render import slide_png
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("union")
@@ -120,3 +127,118 @@ def health(request: Request, conn=Depends(db.get_conn)):
 def car_prices(car_id: int, conn=Depends(db.get_conn)):
     return [{"price_cents": p["price_cents"], "recorded_at": p["recorded_at"].isoformat()}
             for p in queries.price_history(conn, car_id)]
+
+
+# ---- F4: editor de encarte ----------------------------------------------------
+
+DEFAULT_SLIDES = 11
+MAX_SLIDES = 20  # limite do carrossel do Instagram
+
+
+def _car_or_404(conn, car_id: int):
+    car = queries.get_car(conn, car_id)
+    if car is None:
+        raise HTTPException(404, "Carro não encontrado")
+    return car
+
+
+def _detail_or_502(car):
+    from .scraper import ScraperError
+
+    try:
+        return encarte_source.get_detail(car)
+    except ScraperError as exc:
+        log.warning("502 encarte car=%s: scrape_detail falhou: %s", car.id, exc)
+        raise HTTPException(502, f"Falha ao ler o anúncio: {exc}") from exc
+
+
+def _chosen_urls(detail, photos: str | None) -> list[str]:
+    """`photos` = índices em detail.photos na ordem escolhida (default 0..10)."""
+    if not detail.photos:
+        raise HTTPException(422, "Anúncio sem fotos")
+    if photos is None or not photos.strip():
+        return detail.photos[:DEFAULT_SLIDES]
+    try:
+        idx = [int(p) for p in photos.split(",") if p.strip()]
+    except ValueError as exc:
+        raise HTTPException(400, "photos deve ser uma lista de índices, ex.: 0,3,4") from exc
+    idx = list(dict.fromkeys(idx))
+    if not idx or any(i < 0 or i >= len(detail.photos) for i in idx) or len(idx) > MAX_SLIDES:
+        raise HTTPException(400, f"índices de foto inválidos (0..{len(detail.photos) - 1}, máx. {MAX_SLIDES})")
+    return [detail.photos[i] for i in idx]
+
+
+def _png(detail, url: str, cover: bool) -> bytes:
+    import httpx
+
+    try:
+        return slide_png(detail, url, cover)
+    except (httpx.HTTPError, OSError) as exc:
+        log.warning("502 encarte foto %s (capa=%s): %s: %s", url, cover, type(exc).__name__, exc)
+        raise HTTPException(502, f"Falha ao baixar/abrir a foto: {exc}") from exc
+
+
+def _slug(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+
+
+def zip_filename(detail) -> str:
+    parts = [detail.brand, detail.model, str(detail.year_model or detail.year_fab or "")]
+    return (_slug("-".join(p for p in parts if p)) or "encarte") + ".zip"
+
+
+@app.get("/editor", response_class=HTMLResponse)
+def editor(request: Request, conn=Depends(db.get_conn)):
+    return templates.TemplateResponse(request, "editor.html", {"cars": queries.active_cars(conn), "selected": None})
+
+
+@app.get("/editor/{car_id}", response_class=HTMLResponse)
+def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
+    from .scraper import ScraperError
+
+    car = _car_or_404(conn, car_id)
+    ctx = {"cars": queries.active_cars(conn), "selected": None, "car": car}
+    try:
+        detail = encarte_source.get_detail(car)
+    except ScraperError as exc:
+        log.warning("editor car=%s: scrape_detail falhou: %s", car.id, exc)
+        ctx["error"] = f"Não foi possível ler o anúncio no site: {exc}"
+    else:
+        ctx["selected"] = {
+            "car": car,
+            "detail": detail,
+            "photos": [{"index": i, "url": u} for i, u in enumerate(detail.photos)],
+            "caption": build_caption(detail),
+        }
+    return templates.TemplateResponse(request, "editor.html", ctx)
+
+
+@app.get("/encarte/{car_id}/slide/{n}.png")
+def encarte_slide(car_id: int, n: int, photos: str | None = None, conn=Depends(db.get_conn)):
+    detail = _detail_or_502(_car_or_404(conn, car_id))
+    urls = _chosen_urls(detail, photos)
+    if not 0 <= n < len(urls):
+        raise HTTPException(404, "Slide inexistente")
+    return Response(_png(detail, urls[n], n == 0), media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=600"})
+
+
+@app.get("/encarte/{car_id:int}.zip")
+def encarte_zip(car_id: int, photos: str | None = None, conn=Depends(db.get_conn)):
+    detail = _detail_or_502(_car_or_404(conn, car_id))
+    urls = _chosen_urls(detail, photos)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # PNG já é comprimido
+        for i, url in enumerate(urls):
+            zf.writestr(f"{i + 1:02d}.png", _png(detail, url, i == 0))
+        zf.writestr("legenda.txt", build_caption(detail).encode("utf-8"))
+    name = zip_filename(detail)
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/encarte/{car_id}/caption.txt", response_class=PlainTextResponse)
+def encarte_caption(car_id: int, conn=Depends(db.get_conn)):
+    return PlainTextResponse(build_caption(_detail_or_502(_car_or_404(conn, car_id))),
+                             media_type="text/plain; charset=utf-8")

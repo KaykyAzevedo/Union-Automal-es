@@ -10,6 +10,9 @@ App local que acompanha o estoque do site <https://www.unionrioveiculos.com.br>:
 - **Carro vendido (F3):** carro que some do site por 2 coletas seguidas (~30 min) é marcado
   como vendido: aviso no painel + notificação, e o chamado pendente dele é cancelado.
   Se voltar ao site, é reativado sozinho.
+- **Editor de encarte (F4):** em `/editor`, escolha um carro e gere o post do Instagram
+  (1080x1350): capa com a foto principal na moldura + fotos seguintes, legenda pronta e
+  download em ZIP.
 
 Stack: Python 3.13 · FastAPI · SQLite · APScheduler · httpx + BeautifulSoup · Jinja2 + HTMX.
 
@@ -52,6 +55,12 @@ Para mostrar o painel com exemplos (chamados, queda de preço, vendido):
 ```
 
 Os dados demo usam `external_id` com prefixo `demo-` e não interferem na detecção real.
+
+## Fontes do encarte
+
+Coloque os arquivos da **TT Lakes Neue** (`.ttf`/`.otf`, nome contendo "Lakes") em
+`app/assets/fonts/`. Enquanto não existirem, o app usa a Bahnschrift do Windows. Toda a
+configuração de fontes fica em `app/encarte/fonts.py` (`FONTS`).
 
 ## Variáveis de ambiente
 
