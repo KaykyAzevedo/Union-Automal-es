@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import price, photo %}
+{% block title %}Estoque{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Estoque</h1>
+    <p class="muted">{{ cars | length }} carros monitorados no site.</p>
+  </div>
+  <div class="actions">
+    <input type="search" id="car-filter" class="input" placeholder="Buscar carro…" aria-label="Buscar carro">
+  </div>
+</section>
+
+{% if cars %}
+{% set ns = namespace(pending=0, posted=0, sold=0) %}
+{% for car in cars %}
+  {% if car.sold %}{% set ns.sold = ns.sold + 1 %}
+  {% elif car.active and car.posted %}{% set ns.posted = ns.posted + 1 %}
+  {% elif car.active %}{% set ns.pending = ns.pending + 1 %}{% endif %}
+{% endfor %}
+<div class="filters" role="group" aria-label="Filtrar por status">
+  <button type="button" class="chip active" data-filter="all" aria-pressed="true">Todos <span>{{ cars | length }}</span></button>
+  <button type="button" class="chip" data-filter="pending">Pendentes <span>{{ ns.pending }}</span></button>
+  <button type="button" class="chip" data-filter="posted">Postados <span>{{ ns.posted }}</span></button>
+  <button type="button" class="chip" data-filter="sold">Vendidos <span>{{ ns.sold }}</span></button>
+</div>
+<div class="car-table card">
+  <div class="car-row car-head" aria-hidden="true">
+    <span></span><span>Carro</span><span>Preço</span><span>Status</span><span></span>
+  </div>
+  {% for car in cars %}
+  {% set status = 'sold' if car.sold else ('gone' if not car.active else ('posted' if car.posted else 'pending')) %}
+  <div class="car-row {{ 'is-inactive' if not car.active }} {{ 'is-sold' if car.sold }}" data-name="{{ car.name | lower }}" data-status="{{ status }}">
+    {{ photo(car, 'car-thumb') }}
+    <span class="car-name">{{ car.name }}</span>
+    <span class="car-price">{{ price(car.price_cents) }}</span>
+    <span class="car-status">
+      {% if car.sold %}<span class="pill pill-sold">Vendido{% if car.sold_at %} em {{ car.sold_at.strftime('%d/%m') if car.sold_at is not string else car.sold_at }}{% endif %}</span>
+      {% elif not car.active %}<span class="pill pill-muted">Saiu do site</span>
+      {% elif car.posted %}<span class="pill pill-ok">Postado</span>
+      {% else %}<span class="pill pill-warn">Pendente</span>{% endif %}
+    </span>
+    <a class="btn btn-ghost btn-sm" href="{{ car.url }}" target="_blank" rel="noopener">Anúncio ↗</a>
+  </div>
+  {% endfor %}
+  <p class="car-empty muted" hidden>Nenhum carro com esse filtro.</p>
+</div>
+<script>
+  (function () {
+    var search = document.getElementById('car-filter');
+    var chips = document.querySelectorAll('.chip[data-filter]');
+    var empty = document.querySelector('.car-empty');
+    var status = 'all';
+    function apply() {
+      var q = search.value.trim().toLowerCase(), shown = 0;
+      document.querySelectorAll('.car-row[data-name]').forEach(function (row) {
+        var ok = (status === 'all' || row.dataset.status === status) &&
+                 (!q || row.dataset.name.indexOf(q) !== -1);
+        row.hidden = !ok;
+        if (ok) shown++;
+      });
+      empty.hidden = shown > 0;
+    }
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chips.forEach(function (c) { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
+        chip.classList.add('active'); chip.setAttribute('aria-pressed', 'true');
+        status = chip.dataset.filter;
+        apply();
+      });
+    });
+    search.addEventListener('input', apply);
+  })();
+</script>
+{% else %}
+<div class="empty">
+  <div class="empty-icon">🚗</div>
+  <p><strong>Nenhum carro ainda.</strong></p>
+  <p class="muted">Clique em “Verificar agora” no painel para buscar o estoque.</p>
+</div>
+{% endif %}
+{% endblock %}

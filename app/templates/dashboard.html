@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import when %}
+{% block title %}Painel{% endblock %}
+
+{% block content %}
+{% if flash %}
+<div class="flash" role="status">
+  <span>{{ flash }}</span>
+  <button type="button" class="flash-close" aria-label="Fechar" onclick="this.parentElement.remove()">×</button>
+</div>
+{% endif %}
+<section class="page-head">
+  <div>
+    <h1>Painel</h1>
+    <p class="muted">Última verificação: <strong>{{ when(stats.last_check) }}</strong></p>
+  </div>
+  <div class="actions">
+    <form method="post" action="/admin/check-now">
+      <button type="submit" class="btn btn-primary">↻ Verificar agora</button>
+    </form>
+    <form method="post" action="/admin/price-check-now">
+      <button type="submit" class="btn btn-ghost">$ Verificar preços</button>
+    </form>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="stat stat-accent">
+    <span class="stat-value">{{ stats.pending }}</span>
+    <span class="stat-label">Para postar</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ stats.done_today }}</span>
+    <span class="stat-label">Postados hoje</span>
+  </div>
+  <div class="stat stat-warn">
+    <span class="stat-value">{{ stats.alerts }}</span>
+    <span class="stat-label">Preços caíram</span>
+  </div>
+  <div class="stat stat-sold">
+    <span class="stat-value">{{ stats.sold | default(0) }}</span>
+    <span class="stat-label">Vendidos</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">{{ stats.total_cars }}</span>
+    <span class="stat-label">Carros no estoque</span>
+  </div>
+</section>
+
+{% if sold %}
+<section class="section" id="sold-section">
+  <h2 class="section-title">Vendidos <span class="pill pill-sold">{{ sold | length }}</span></h2>
+  <div class="alert-list">
+    {% for sold_alert in sold %}
+      {% include "partials/sold_card.html" %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if alerts %}
+<section class="section">
+  <h2 class="section-title">Preço caiu <span class="pill pill-warn">{{ alerts | length }}</span></h2>
+  <div class="alert-list">
+    {% for alert in alerts %}
+      {% include "partials/alert_card.html" %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="section">
+  <h2 class="section-title">Para postar <span class="pill">{{ tickets | length }}</span></h2>
+  {% if tickets %}
+    <div class="ticket-grid">
+      {% for ticket in tickets %}
+        {% include "partials/ticket_card.html" %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">
+      <div class="empty-icon">✓</div>
+      <p><strong>Tudo em dia!</strong></p>
+      <p class="muted">Nenhum carro novo esperando post. O site é verificado a cada 15 minutos.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

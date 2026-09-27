@@ -1,0 +1,22 @@
+{% from "partials/_macros.html" import when, price, photo %}
+<article class="card ticket" id="ticket-{{ ticket.id }}">
+  <a class="ticket-photo" href="{{ ticket.car.url }}" target="_blank" rel="noopener">
+    {{ photo(ticket.car, 'ticket-img') }}
+    <span class="badge badge-new">Novo</span>
+  </a>
+  <div class="ticket-body">
+    <h3 class="ticket-name">{{ ticket.car.name }}</h3>
+    <p class="ticket-price">{{ price(ticket.car.price_cents) }}</p>
+    <p class="muted small">Chegou em {{ when(ticket.created_at) }}</p>
+    <div class="ticket-actions">
+      <a class="btn btn-ghost" href="{{ ticket.car.url }}" target="_blank" rel="noopener">Ver anúncio ↗</a>
+      <button class="btn btn-success btn-block"
+              hx-post="/tickets/{{ ticket.id }}/done"
+              hx-target="#ticket-{{ ticket.id }}"
+              hx-swap="outerHTML"
+              hx-disabled-elt="this">
+        ✓ Feito — postado no Instagram
+      </button>
+    </div>
+  </div>
+</article>

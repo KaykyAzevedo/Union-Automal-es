@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Painel{% endblock %} · Union Veículos</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+  <script>
+    // Aplica o tema salvo antes de pintar a página (evita "piscar").
+    (function () {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark">U</span>
+        <span class="brand-text">Union Veículos <small>Social Media</small></span>
+      </a>
+      <nav class="nav">
+        {% set path = request.url.path if request is defined else '' %}
+        <a href="/" class="{{ 'active' if path == '/' }}">Painel</a>
+        <a href="/cars" class="{{ 'active' if path.startswith('/cars') }}">Estoque</a>
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro" title="Alternar tema">
+          <span class="icon-sun">☀</span><span class="icon-moon">☾</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="container footer">Union Veículos · painel local</footer>
+
+  <script>
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      var root = document.documentElement;
+      var current = root.dataset.theme ||
+        (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      var next = current === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = next;
+      try { localStorage.setItem('theme', next); } catch (e) {}
+    });
+    // Desabilita botões de formulários comuns enquanto enviam.
+    document.addEventListener('submit', function (e) {
+      var btn = e.target.querySelector('button[type=submit]');
+      if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+    });
+  </script>
+</body>
+</html>

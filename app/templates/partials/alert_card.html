@@ -1,0 +1,30 @@
+{% from "partials/_macros.html" import when, photo %}
+{% set diff = (alert.old_price_cents or 0) - (alert.new_price_cents or 0) %}
+{% set pct = (diff * 100.0 / alert.old_price_cents) if alert.old_price_cents else 0 %}
+<article class="card alert-card" id="alert-{{ alert.id }}">
+  <a class="alert-photo" href="{{ alert.car.url }}" target="_blank" rel="noopener">
+    {{ photo(alert.car, 'alert-img') }}
+  </a>
+  <div class="alert-body">
+    <h3 class="alert-name">{{ alert.car.name }}</h3>
+    <div class="alert-prices">
+      <s class="price-old">{{ alert.old_price_cents | brl }}</s>
+      <span class="arrow" aria-hidden="true">→</span>
+      <strong class="price-new">{{ alert.new_price_cents | brl }}</strong>
+    </div>
+    <div class="alert-meta">
+      <span class="pill pill-drop">↓ {{ diff | brl }} ({{ '%.1f' | format(pct) | replace('.', ',') }}%)</span>
+      <span class="muted small">{{ when(alert.created_at) }}</span>
+    </div>
+  </div>
+  <div class="alert-actions">
+    <a class="btn btn-ghost btn-sm" href="{{ alert.car.url }}" target="_blank" rel="noopener">Anúncio ↗</a>
+    <button class="btn btn-sm btn-outline"
+            hx-post="/alerts/{{ alert.id }}/dismiss"
+            hx-target="#alert-{{ alert.id }}"
+            hx-swap="outerHTML swap:200ms"
+            hx-disabled-elt="this">
+      Dispensar
+    </button>
+  </div>
+</article>

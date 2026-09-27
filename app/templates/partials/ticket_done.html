@@ -1,0 +1,11 @@
+{% from "partials/_macros.html" import photo %}
+<article class="card ticket ticket-done" id="ticket-{{ ticket.id }}">
+  <div class="done-inner">
+    {{ photo(ticket.car, 'done-thumb') }}
+    <div>
+      <p class="done-check">✓ Postado</p>
+      <p class="done-name">{{ ticket.car.name }}</p>
+      <p class="muted small">Marcado como postado no Instagram.</p>
+    </div>
+  </div>
+</article>

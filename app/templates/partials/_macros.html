@@ -1,0 +1,22 @@
+{# Helpers compartilhados pelos templates do painel. #}
+
+{% macro when(dt, fmt='%d/%m/%Y %H:%M') -%}
+  {%- if not dt -%}—
+  {%- elif dt is string -%}{{ dt }}
+  {%- else -%}{{ dt.strftime(fmt) }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro price(cents) -%}
+  {%- if cents is none -%}Sob consulta
+  {%- else -%}{{ cents | brl }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro photo(car, cls='') -%}
+  {%- if car.photo_url -%}
+    <img class="{{ cls }}" src="{{ car.photo_url }}" alt="{{ car.name }}" loading="lazy" referrerpolicy="no-referrer">
+  {%- else -%}
+    <div class="{{ cls }} photo-placeholder" aria-hidden="true">🚗</div>
+  {%- endif -%}
+{%- endmacro %}

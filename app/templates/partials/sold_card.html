@@ -1,0 +1,22 @@
+{% from "partials/_macros.html" import when, price, photo %}
+<article class="card sold-card" id="sold-{{ sold_alert.id }}">
+  <a class="sold-photo" href="{{ sold_alert.car.url }}" target="_blank" rel="noopener">
+    {{ photo(sold_alert.car, 'sold-img') }}
+    <span class="badge badge-sold">Vendido</span>
+  </a>
+  <div class="sold-body">
+    <h3 class="sold-name">{{ sold_alert.car.name }}</h3>
+    <p class="sold-price"><span class="muted small">Último preço</span> {{ price(sold_alert.car.price_cents) }}</p>
+    <p class="muted small">Vendido em {{ when(sold_alert.car.sold_at or sold_alert.created_at, '%d/%m %H:%M') }}</p>
+    <p class="sold-reminder">📣 Atualize o post no Instagram (marcar como <strong>VENDIDO</strong>)</p>
+  </div>
+  <div class="sold-actions">
+    <button class="btn btn-sm btn-sold"
+            hx-post="/sold/{{ sold_alert.id }}/dismiss"
+            hx-target="#sold-{{ sold_alert.id }}"
+            hx-swap="outerHTML swap:200ms"
+            hx-disabled-elt="this">
+      ✓ Ciente
+    </button>
+  </div>
+</article>
