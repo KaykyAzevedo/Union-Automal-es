@@ -9,6 +9,7 @@ import json
 import logging
 import threading
 import time
+from datetime import date
 from dataclasses import asdict, dataclass, field, fields
 
 from .. import db
@@ -77,6 +78,8 @@ def _decode(data: str):
     except ImportError:  # pragma: no cover
         cls = FakeCarDetail
     raw = json.loads(data)
+    if raw.get("listed_at") is not None:  # gravado como ISO por _db_put
+        raw["listed_at"] = date.fromisoformat(raw["listed_at"])
     names = {f.name for f in fields(cls)}
     return cls(**{k: v for k, v in raw.items() if k in names})
 
@@ -95,11 +98,17 @@ def _db_get(conn, key: str):
         return None
 
 
+def _json_default(value):
+    if isinstance(value, date):  # CarDetail.listed_at
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def _db_put(conn, key: str, detail) -> None:
     conn.execute(
         """INSERT INTO detail_cache (external_id, data, fetched_at) VALUES (?, ?, ?)
            ON CONFLICT (external_id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at""",
-        (key, json.dumps(asdict(detail), ensure_ascii=False), db.to_iso(db.now())),
+        (key, json.dumps(asdict(detail), ensure_ascii=False, default=_json_default), db.to_iso(db.now())),
     )
     conn.commit()
 

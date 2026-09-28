@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import io
 import zipfile
-from dataclasses import replace
+from dataclasses import asdict, replace
+from datetime import date
 
 import httpx
 import pytest
@@ -101,6 +102,17 @@ def cars(conn):
 
 
 # --- parse_detail: ordem das fotos -------------------------------------------
+
+@pytest.mark.parametrize("listed_at", [date(2026, 9, 15), None])
+def test_detail_cache_db_round_trip_preserves_fields(conn, listed_at):
+    """Regressão: listed_at (date) quebrava json.dumps em _db_put → /editor 500."""
+    original = replace(detail("5575766"), listed_at=listed_at, armored=True, armor_company="Security")
+    source._db_put(conn, original.external_id, original)
+    got = source._db_get(conn, original.external_id)
+    assert got == original
+    assert asdict(got) == asdict(original)
+    assert got.listed_at == listed_at and (listed_at is None or type(got.listed_at) is date)
+
 
 def test_tracker_photos_in_site_order():
     names = [p.rsplit("/", 1)[1] for p in detail("5575766").photos]
