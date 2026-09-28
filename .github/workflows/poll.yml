@@ -1,20 +1,13 @@
-# Verifica carros novos no site a cada 15 min chamando o app na Vercel.
-# A Vercel Hobby só permite cron diário, por isso o agendamento fica aqui.
+# Dispara MANUALMENTE a verificação diária do app na Vercel (/cron/daily).
+# O agendamento normal é o Vercel Cron do vercel.json (todo dia 18:00 BRT); este
+# workflow serve para rodar na hora: Actions > Poll estoque > Run workflow.
 #
 # Configurar em GitHub > Settings > Secrets and variables > Actions > New repository secret:
-#   APP_URL      endereço do app, ex.: https://union-painel.vercel.app
+#   APP_URL      endereço do app, ex.: https://union-automal-es.vercel.app
 #   CRON_SECRET  o mesmo valor da variável CRON_SECRET na Vercel
-#
-# Observações:
-# - O GitHub pode atrasar execuções agendadas em alguns minutos em horários de pico.
-# - Em repositórios sem atividade por 60 dias o GitHub desliga o agendamento;
-#   basta reativar em Actions > Poll estoque > Enable workflow.
-# - Para rodar na hora: Actions > Poll estoque > Run workflow.
 name: Poll estoque
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -28,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Chamar /cron/poll
+      - name: Chamar /cron/daily
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -37,7 +30,7 @@ jobs:
             echo "::error::Configure os secrets APP_URL e CRON_SECRET do repositório."
             exit 1
           fi
-          url="${APP_URL%/}/cron/poll"
+          url="${APP_URL%/}/cron/daily"
           status=$(curl -sS -o response.json -w '%{http_code}' \
             --max-time 120 --retry 2 --retry-delay 15 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" "$url") || status=000
@@ -45,6 +38,6 @@ jobs:
           cat response.json 2>/dev/null || true
           echo
           if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
-            echo "::error::/cron/poll respondeu HTTP $status"
+            echo "::error::/cron/daily respondeu HTTP $status"
             exit 1
           fi

@@ -3,8 +3,8 @@
 Regras (constantes só aqui):
 - since = min(first_seen, listed_at). listed_at = data de envio da foto principal
   (sempre >= cadastro real). Carros do registro inicial (in_baseline) → since_is_estimate
-  =True ("há pelo menos X dias"); carros detectados depois pelo poll → False (first_seen
-  tem precisão de 15 min).
+  =True ("há pelo menos X dias"); carros detectados depois pela verificação → False (first_seen
+  tem a precisão de uma verificação).
 - Relógio da sugestão = dias desde a última REDUÇÃO de preço (price_history), ou desde
   `since` se nunca baixou. Subida de preço não reinicia o relógio.
 - TIERS: relógio >= 60 → -8%; >= 45 → -5%; >= 30 → -3%; < 30 → sem sugestão.

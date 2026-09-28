@@ -6,7 +6,7 @@ import pytest
 from app.scraper import ScraperError
 
 SECRET = "s3cr3t-cron-token"
-JOBS = [("/cron/poll", "poll"), ("/cron/price-check", "price_check")]
+JOBS = [("/cron/poll", "poll"), ("/cron/price-check", "price_check"), ("/cron/daily", "daily")]
 
 
 @pytest.fixture

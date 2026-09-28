@@ -4,7 +4,8 @@
 
 {% block content %}
 {% if flash %}
-<div class="flash" role="status">
+{% set failed = request is defined and request.query_params.get('msg') == 'check_failed' %}
+<div class="flash {{ 'flash-error' if failed }}" role="{{ 'alert' if failed else 'status' }}">
   <span>{{ flash }}</span>
   <button type="button" class="flash-close" aria-label="Fechar" onclick="this.parentElement.remove()">×</button>
 </div>
@@ -12,14 +13,16 @@
 <section class="page-head">
   <div>
     <h1>Painel</h1>
-    <p class="muted">Última verificação: <strong>{{ when(stats.last_check) }}</strong></p>
+    <p class="muted check-info">
+      <span>Última verificação: <strong>{{ when(stats.last_check) }}</strong></span>
+      {# next_check vem do backend (próximas 18:00 em America/Sao_Paulo); o JS troca a data por "hoje"/"amanhã" #}
+      {% set nc = stats.next_check if stats.next_check is defined else none %}
+      <span>Próxima: <strong id="next-check"{% if nc and nc is not string %} data-iso="{{ nc.isoformat() }}"{% endif %}>{% if nc and nc is not string %}{{ nc.strftime('%d/%m') }} às {{ nc.strftime('%H:%M') }}{% else %}todo dia às 18:00{% endif %}</strong></span>
+    </p>
   </div>
   <div class="actions">
-    <form method="post" action="/admin/check-now">
-      <button type="submit" class="btn btn-primary">↻ Verificar agora</button>
-    </form>
-    <form method="post" action="/admin/price-check-now">
-      <button type="submit" class="btn btn-ghost">$ Verificar preços</button>
+    <form method="post" action="/admin/check-now" data-loading-text="Verificando o site…">
+      <button type="submit" class="btn btn-primary" title="Busca carros novos, mudanças de preço e vendidos">↻ Verificar agora</button>
     </form>
   </div>
 </section>
@@ -81,8 +84,31 @@
     <div class="empty">
       <div class="empty-icon">✓</div>
       <p><strong>Tudo em dia!</strong></p>
-      <p class="muted">Nenhum carro novo esperando post. O site é verificado a cada 15 minutos.</p>
+      <p class="muted">Nenhum carro novo esperando post. O site é verificado todo dia às 18:00.</p>
     </div>
   {% endif %}
 </section>
+<script>
+  // "Próxima verificação": mostra hoje/amanhã comparando datas no fuso de São Paulo.
+  (function () {
+    var el = document.getElementById('next-check');
+    if (!el) return;
+    var TZ = 'America/Sao_Paulo';
+    var next = el.dataset.iso ? new Date(el.dataset.iso) : null;
+    if (!next || isNaN(next)) {
+      // sem next_check no ctx: próximas 18:00 em São Paulo (UTC-3, sem horário de verão)
+      var now = new Date();
+      next = new Date(now.getTime());
+      next.setUTCHours(21, 0, 0, 0);
+      if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+    }
+    function day(d) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); }
+    var hm = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(next);
+    var today = new Date();
+    var tomorrow = new Date(today.getTime() + 864e5);
+    var label = day(next) === day(today) ? 'hoje' : day(next) === day(tomorrow) ? 'amanhã'
+      : new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit' }).format(next);
+    el.textContent = label + ' às ' + hm;
+  })();
+</script>
 {% endblock %}

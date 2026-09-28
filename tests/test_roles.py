@@ -136,6 +136,8 @@ def test_staff_login_next(client, roles, next_, expected):
 def test_staff_cron_without_bearer_401(staff, site):
     assert staff.get("/cron/poll", follow_redirects=False).status_code == 401
     assert staff.get("/cron/price-check", follow_redirects=False).status_code == 401
+    assert staff.get("/cron/daily", follow_redirects=False).status_code == 401
+    assert staff.get("/cron/daily", headers={"Authorization": "Bearer errado"}).status_code == 401
     assert site.calls == 0
 
 

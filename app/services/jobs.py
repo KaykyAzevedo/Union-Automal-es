@@ -9,6 +9,7 @@ from .. import db
 from ..db import connect, now, to_iso
 from . import scraping
 from .notify import notify_new_cars, notify_price_drops, notify_sold
+from .daily import run_daily
 from .prices import run_price_check
 from .sync import run_poll
 
@@ -19,7 +20,7 @@ busy: dict[str, bool] = {}  # True se a última tentativa desistiu por outra ins
 JOB_LOCK_WAIT = 20.0  # s (maxDuration da função é 60)
 
 
-def _run(kind: str, fn) -> dict | None:
+def _run(kind: str, fn, enrich: dict | None = None) -> dict | None:
     """Roda um job registrando em `runs`. Retorna o resultado, ou None se falhou
     (motivo em last_error[kind]; busy[kind] se desistiu por lock ocupado). No
     Postgres, um lock entre instâncias (db.advisory_lock, com prazo) impede duas
@@ -34,7 +35,7 @@ def _run(kind: str, fn) -> dict | None:
                 conn.commit()
                 try:
                     scraped = scraping.scrape_all()
-                    scraping.enrich_listed_at(conn, scraped)
+                    scraping.enrich_listed_at(conn, scraped, **(enrich or {}))
                     result = fn(conn, scraped)
                 except Exception as exc:
                     conn.rollback()
@@ -82,6 +83,18 @@ def poll_job() -> dict | None:
 def price_check_job() -> dict | None:
     result = _run("price_check", run_price_check)
     if result:
+        notify_price_drops(result["drops"])
+        notify_sold([c["name"] for c in _cars(result.get("sold_car_ids", []))])
+    return result
+
+
+def daily_job() -> dict | None:
+    """Verificação diária completa (F7): novos, preços e vendidos numa coleta só, e o
+    listed_at do estoque todo (até DAILY_LISTED_AT_BATCH, prazo DAILY_LISTED_AT_DEADLINE)."""
+    result = _run("daily", run_daily, enrich={"batch": scraping.DAILY_LISTED_AT_BATCH,
+                                              "deadline": scraping.DAILY_LISTED_AT_DEADLINE})
+    if result:
+        notify_new_cars(_cars(result["new_car_ids"]))
         notify_price_drops(result["drops"])
         notify_sold([c["name"] for c in _cars(result.get("sold_car_ids", []))])
     return result

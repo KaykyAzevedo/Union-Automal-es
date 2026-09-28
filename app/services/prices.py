@@ -8,7 +8,7 @@ from .sold import track_missing
 from .sync import match_all, refresh_car
 
 
-def run_price_check(conn: sqlite3.Connection, scraped: list) -> dict:
+def run_price_check(conn: sqlite3.Connection, scraped: list, track: bool = True) -> dict:
     """Casa cada anúncio (external_id, depois nome) e compara preço.
 
     Toda mudança vai para price_history; queda (novo < antigo, ambos conhecidos)
@@ -45,7 +45,8 @@ def run_price_check(conn: sqlite3.Connection, scraped: list) -> dict:
             )
             alert_ids.append(cur.lastrowid)
 
-    sold_ids = track_missing(conn, seen, ts) if seen else []
+    # track=False quando a MESMA coleta já passou pelo run_poll (job diário): não conta a ausência 2x
+    sold_ids = track_missing(conn, seen, ts) if seen and track else []
     conn.commit()
     return {"checked": checked, "changed": changed, "drops": len(alert_ids), "sold": len(sold_ids),
             "alert_ids": alert_ids, "sold_car_ids": sold_ids}

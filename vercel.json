@@ -7,6 +7,9 @@
     }
   },
   "crons": [
-    { "path": "/cron/price-check", "schedule": "0 21 * * *" }
+    {
+      "path": "/cron/daily",
+      "schedule": "0 21 * * *"
+    }
   ]
 }

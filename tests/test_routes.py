@@ -1,6 +1,8 @@
 """Rotas FastAPI + templates (TestClient, scraper mockado via fixture `site`)."""
 from __future__ import annotations
 
+import pytest
+
 from app import db
 from app.services.prices import run_price_check
 from app.services.sync import run_poll
@@ -106,10 +108,14 @@ def test_admin_check_now_scraper_error_changes_nothing(client, site, car):
     assert "Falha ao consultar o site" in client.get("/?msg=check_failed").text
 
 
-def test_admin_price_check_now_redirects(client, site, car):
+@pytest.mark.parametrize("path", ["/admin/check-now", "/admin/price-check-now"])
+def test_admin_check_buttons_run_daily_and_redirect(client, site, car, conn, path):
+    """F7: os dois botões rodam a verificação diária completa (runs.kind = 'daily')."""
     site.cars = [car("1")]
-    r = client.post("/admin/price-check-now", follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/?msg=price_checked"
+    r = client.post(path, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/?msg=checked"
+    assert site.calls == 1
+    assert [tuple(x) for x in conn.execute("SELECT kind, ok FROM runs")] == [("daily", 1)]
 
 
 def test_price_history_api(client, car):

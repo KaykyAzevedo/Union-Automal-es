@@ -21,21 +21,27 @@ def _trigger(job_id):
         s.shutdown(wait=False)
 
 
-def test_price_check_fires_at_18h_sao_paulo():
-    trig = _trigger("price_check")
+def test_only_daily_job_registered():
+    s = create_scheduler()
+    s.start(paused=True)
+    try:
+        assert [j.id for j in s.get_jobs()] == ["daily"]
+        assert s.get_job("poll") is None and s.get_job("price_check") is None
+    finally:
+        s.shutdown(wait=False)
+
+
+def test_daily_fires_at_18h_sao_paulo():
+    trig = _trigger("daily")
     # 17:00 em SP == 20:00 UTC → próxima 18:00 SP (21:00 UTC) do mesmo dia
     base = datetime(2026, 9, 27, 20, 0, tzinfo=timezone.utc)
     nxt = trig.get_next_fire_time(None, base)
     assert nxt.astimezone(SP).replace(tzinfo=None) == datetime(2026, 9, 27, 18, 0)
     assert nxt.astimezone(timezone.utc).hour == 21
-    # passou das 18:00 → dia seguinte
+    # passou das 18:00 → dia seguinte (uma vez por dia, nada no meio)
     nxt2 = trig.get_next_fire_time(None, nxt + timedelta(minutes=1))
     assert nxt2.astimezone(SP).replace(tzinfo=None) == datetime(2026, 9, 28, 18, 0)
-
-
-def test_poll_interval_is_15_minutes():
-    trig = _trigger("poll")
-    assert trig.interval == timedelta(minutes=15)
+    assert nxt2 - nxt == timedelta(days=1)
 
 
 @pytest.mark.parametrize("cents, text", [

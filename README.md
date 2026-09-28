@@ -1,15 +1,17 @@
 # Union Veículos — Painel da social media
 
-App local que acompanha o estoque do site <https://www.unionrioveiculos.com.br>:
+App que acompanha o estoque do site <https://www.unionrioveiculos.com.br>. Uma
+**verificação diária às 18:00 (America/Sao_Paulo)** faz uma coleta do site e aplica tudo
+(o botão **Verificar agora** do painel roda a mesma verificação na hora):
 
-- **Carros novos (F1):** a cada 15 min o site é consultado; cada carro novo vira um
-  *chamado pendente* com foto no painel. O botão **Feito** marca o carro como postado.
-- **Queda de preço (F2):** todo dia às **18:00 (America/Sao_Paulo)** os preços são revisados
-  (casando por id do anúncio e, como fallback, pelo nome). Quedas geram alertas
-  "preço antigo → preço atual" no painel. Todo preço fica no histórico.
-- **Carro vendido (F3):** carro que some do site por 2 coletas seguidas (~30 min) é marcado
-  como vendido: aviso no painel + notificação, e o chamado pendente dele é cancelado.
-  Se voltar ao site, é reativado sozinho.
+- **Carros novos (F1):** cada carro novo vira um *chamado pendente* com foto no painel.
+  O botão **Feito** marca o carro como postado.
+- **Queda de preço (F2):** os preços são revisados (casando por id do anúncio e, como
+  fallback, pelo nome). Quedas geram alertas "preço antigo → preço atual" no painel.
+  Todo preço fica no histórico.
+- **Carro vendido (F3):** carro que some do site em 2 verificações seguidas (2 dias) é
+  marcado como vendido: aviso no painel + notificação, e o chamado pendente dele é
+  cancelado. Se voltar ao site, é reativado sozinho.
 - **Editor de encarte (F4):** em `/editor`, escolha um carro e gere o post do Instagram
   (1080x1350): capa com a foto principal na moldura + fotos seguintes, legenda pronta e
   download em ZIP.
@@ -87,11 +89,12 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
   As tabelas são criadas/migradas sozinhas no primeiro acesso.
 - **Agendamento:** o APScheduler fica desligado (`VERCEL=1`). Os jobs são rotas HTTP
   protegidas por `Authorization: Bearer <CRON_SECRET>`:
-  - `GET /cron/price-check` — Vercel Cron diário `0 21 * * *` (21:00 UTC = 18:00 BRT,
-    configurado no `vercel.json`). **No plano Hobby a Vercel pode disparar em qualquer
-    minuto dessa hora** (18:00–18:59).
-  - `GET /cron/poll` — a cada 15 min pelo GitHub Actions (`.github/workflows/poll.yml`),
-    porque o Hobby só permite cron diário.
+  - `GET /cron/daily` — verificação diária completa, pelo Vercel Cron `0 21 * * *`
+    (21:00 UTC = 18:00 BRT, no `vercel.json`). **No plano Hobby a Vercel pode disparar em
+    qualquer minuto dessa hora** (18:00–18:59). Para rodar na hora: botão *Verificar
+    agora* no painel, ou GitHub → *Actions → Poll estoque → Run workflow* (só manual).
+  - `GET /cron/poll` e `GET /cron/price-check` continuam por compatibilidade (só novos/
+    vendidos ou só preços); não são agendados.
   - Respostas JSON: `200 {ok: true, job, result}`; falha no site → `502 {ok: false, error}`;
     Bearer errado → `401`; `CRON_SECRET` ausente → `503`.
 - **Login com dois perfis** (mesma tela; a senha decide o perfil):
@@ -127,12 +130,12 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
 3. Cadastre `APP_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, `APP_URL`, `STAFF_PASSWORD` (e, se quiser,
    `WHATSAPP_PHONE` + `CALLMEBOT_APIKEY`). Faça **Redeploy** depois de mudar variáveis.
 4. **Deployment Protection:** se a proteção (Vercel Authentication) estiver ligada no
-   domínio de produção, o GitHub Actions leva 401 em `/cron/poll`. Deixe a produção
+   domínio de produção, o Vercel Cron e o workflow manual levam 401 em `/cron/daily`. Deixe a produção
    pública (o app já tem login próprio) ou use *Protection Bypass for Automation*.
 5. No GitHub: **Settings → Secrets and variables → Actions** → secrets `APP_URL` e
-   `CRON_SECRET` (mesmos valores da Vercel). Rode o workflow uma vez em *Actions →
-   Run workflow* para testar.
-6. Primeira execução do poll no banco novo: o estoque atual entra como já postado
+   `CRON_SECRET` (mesmos valores da Vercel), só para o disparo manual em *Actions →
+   Poll estoque → Run workflow*.
+6. Primeira verificação no banco novo: o estoque atual entra como já postado
    (baseline), sem chamados.
 
 Limites do Hobby considerados: função até 60 s (`maxDuration` no `vercel.json`),
@@ -146,7 +149,6 @@ resposta até 4,5 MB (cada slide PNG tem ~1,6 MB), 1 cron por dia.
 | `UNION_DISABLE_SCHEDULER=1` | não inicia os jobs (testes) |
 | `UNION_MOCK_SCRAPER=1` | usa dados falsos em vez do site |
 | `UNION_DISABLE_NOTIFY=1` | desliga notificações do Windows |
-| `UNION_POLL_MINUTES` | intervalo do poll (padrão 15) |
 | `UNION_DATA_DIR` | pasta de caches (padrão `data/`; na Vercel `/tmp/union`) |
 | `DATABASE_URL` | usa Postgres em vez do SQLite (ver Deploy) |
 
@@ -157,7 +159,7 @@ app/
   main.py        rotas FastAPI + templates
   db.py          conexão e schema SQLite
   models.py      Car, Ticket, PriceAlert
-  scheduler.py   APScheduler (15 min + 18:00)
+  scheduler.py   APScheduler local (verificação diária 18:00)
   scraper/       coleta do site
   services/      sync (carros novos), prices (queda), matching, queries, jobs, notify
   templates/ static/   painel (Jinja2 + HTMX)

@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS sold_alerts (
 
 CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind         TEXT NOT NULL,          -- poll | price_check
+    kind         TEXT NOT NULL,          -- poll | price_check | daily
     started_at   TEXT NOT NULL,
     finished_at  TEXT,
     ok           INTEGER,

@@ -5,6 +5,7 @@ import sqlite3
 
 from ..db import from_iso, now, to_iso
 from ..models import Car, PriceAlert, SoldAlert, Ticket
+from .daily import next_check
 
 _CAR_COLS = ("c.id, c.external_id, c.name, c.photo_url, c.price_cents, c.url, "
              "c.posted, c.active, c.first_seen, c.last_seen, c.missing_count, c.sold_at")
@@ -112,6 +113,7 @@ def stats(conn) -> dict:
         "sold": one("SELECT COUNT(*) FROM sold_alerts WHERE dismissed = 0"),
         "total_cars": one("SELECT COUNT(*) FROM cars WHERE active = 1"),
         "last_check": last_check(conn),
+        "next_check": next_check(),
     }
 
 

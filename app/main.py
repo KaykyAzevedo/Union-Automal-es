@@ -20,7 +20,7 @@ from . import db
 from .services import queries
 from .services.formatting import brl, dt
 from .services import aging, jobs
-from .services.jobs import poll_job, price_check_job
+from .services.jobs import daily_job, poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
 from .encarte.render import slide_png
@@ -34,7 +34,7 @@ templates.env.filters["brl"] = brl
 templates.env.filters["dt"] = dt
 
 FLASH = {
-    "checked": "Verificação de carros novos concluída.",
+    "checked": "Verificação concluída: carros novos, preços e vendidos.",
     "price_checked": "Revisão de preços concluída.",
     "check_failed": "Falha ao consultar o site — veja o log.",
 }
@@ -118,13 +118,14 @@ def sold_dismiss(sold_id: int, conn=Depends(db.get_conn)):
 
 @app.post("/admin/check-now")
 def check_now():
-    msg = "checked" if poll_job() is not None else "check_failed"
+    msg = "checked" if daily_job() is not None else "check_failed"
     return RedirectResponse(f"/?msg={msg}", status_code=303)
 
 
 @app.post("/admin/price-check-now")
 def price_check_now():
-    msg = "price_checked" if price_check_job() is not None else "check_failed"
+    # compatibilidade: o botão antigo "Verificar preços" também roda a verificação completa
+    msg = "checked" if daily_job() is not None else "check_failed"
     return RedirectResponse(f"/?msg={msg}", status_code=303)
 
 
@@ -136,7 +137,8 @@ def health(request: Request, conn=Depends(db.get_conn)):
         for j in scheduler.get_jobs()
     ]
     stats = queries.stats(conn)
-    stats["last_check"] = stats["last_check"].isoformat() if stats["last_check"] else None
+    for key in ("last_check", "next_check"):
+        stats[key] = stats[key].isoformat() if stats[key] else None
     return {"ok": True, "jobs": jobs, "stats": stats}
 
 
@@ -282,11 +284,18 @@ def _cron(request: Request, kind: str, job) -> JSONResponse:
 
 @app.get("/cron/poll")
 def cron_poll(request: Request):
-    """Carros novos/vendidos. Idempotente. Chamado a cada 15 min pelo agendador externo."""
+    """Só carros novos/vendidos (compatibilidade; o agendamento usa /cron/daily)."""
     return _cron(request, "poll", poll_job)
 
 
 @app.get("/cron/price-check")
 def cron_price_check(request: Request):
-    """Revisão de preços. Idempotente. Vercel Cron diário 21:00 UTC (18:00 BRT)."""
+    """Só revisão de preços (compatibilidade; o agendamento usa /cron/daily)."""
     return _cron(request, "price_check", price_check_job)
+
+
+@app.get("/cron/daily")
+def cron_daily(request: Request):
+    """Verificação diária completa (novos, preços, vendidos). Idempotente.
+    Vercel Cron "0 21 * * *" (18:00 BRT; no Hobby dispara entre 18:00 e 18:59)."""
+    return _cron(request, "daily", daily_job)

@@ -69,7 +69,10 @@
     // Desabilita botões de formulários comuns enquanto enviam.
     document.addEventListener('submit', function (e) {
       var btn = e.target.querySelector('button[type=submit]');
-      if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
+      if (btn) {
+        btn.disabled = true; btn.classList.add('is-loading');
+        if (e.target.dataset.loadingText) btn.textContent = e.target.dataset.loadingText;
+      }
     });
   </script>
 </body>

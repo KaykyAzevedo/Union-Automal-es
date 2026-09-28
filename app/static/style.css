@@ -163,6 +163,12 @@ main.container { flex: 1; padding-top: 24px; padding-bottom: 40px; }
   border: 0; background: transparent; color: inherit; font-size: 20px; line-height: 1; cursor: pointer;
 }
 
+.flash-error {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface)); color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+.check-info { display: flex; flex-wrap: wrap; gap: 2px 16px; }
+
 /* ---------- page head ---------- */
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
