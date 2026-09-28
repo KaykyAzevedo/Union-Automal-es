@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from . import db
 from .services import queries
 from .services.formatting import brl, dt
-from .services import jobs
+from .services import aging, jobs
 from .services.jobs import poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
@@ -65,7 +65,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Union Veículos — Painel", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static"), check_dir=False), name="static")
 
-from .auth import install_auth  # noqa: E402  (login/logout, sessão, global Jinja auth_enabled)
+from . import auth  # noqa: E402
+from .auth import install_auth, require_role  # noqa: E402  (perfis admin/staff, sessão, globals Jinja)
 
 install_auth(app, templates)
 
@@ -79,6 +80,13 @@ def dashboard(request: Request, msg: str | None = None, conn=Depends(db.get_conn
         "stats": queries.stats(conn),
         "flash": FLASH.get(msg) if msg else None,
     })
+
+
+@app.get("/equipe", response_class=HTMLResponse,
+         dependencies=[Depends(require_role(auth.ADMIN, auth.STAFF))])
+def equipe(request: Request, conn=Depends(db.get_conn)):
+    """Painel da Equipe (admin e staff): tempo em estoque e sugestões de redução. Só leitura."""
+    return templates.TemplateResponse(request, "equipe.html", aging.team_view(conn))
 
 
 @app.get("/cars", response_class=HTMLResponse)

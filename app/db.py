@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS cars (
     first_seen   TEXT NOT NULL,
     last_seen    TEXT NOT NULL,
     missing_count INTEGER NOT NULL DEFAULT 0,  -- coletas seguidas sem o carro
-    sold_at      TEXT
+    sold_at      TEXT,
+    in_baseline  INTEGER NOT NULL DEFAULT 0,  -- entrou no registro inicial (1ª coleta): entrada real desconhecida
+    listed_at    TEXT,                         -- data de cadastro no site (Last-Modified da foto), se disponível
+    listed_at_checked TEXT                     -- última tentativa de obter listed_at (1x por dia)
 );
 CREATE INDEX IF NOT EXISTS ix_cars_name_key ON cars(name_key);
 
@@ -151,6 +154,9 @@ def connect(path: str | Path | None = None):
 MIGRATIONS = [
     ("cars", "missing_count", "INTEGER NOT NULL DEFAULT 0"),
     ("cars", "sold_at", "TEXT"),
+    ("cars", "in_baseline", "INTEGER NOT NULL DEFAULT 0"),
+    ("cars", "listed_at", "TEXT"),
+    ("cars", "listed_at_checked", "TEXT"),
 ]
 
 
@@ -163,6 +169,14 @@ def migrate(conn) -> None:
         existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    # Backfill único para bancos anteriores à F6: o registro inicial são os carros com o
+    # menor first_seen (todos inseridos com o mesmo timestamp). Só roda se ninguém tiver a flag.
+    conn.execute(
+        """UPDATE cars SET in_baseline = 1
+           WHERE external_id NOT LIKE 'demo-%'
+             AND first_seen = (SELECT MIN(first_seen) FROM cars WHERE external_id NOT LIKE 'demo-%')
+             AND NOT EXISTS (SELECT 1 FROM cars WHERE in_baseline = 1)"""
+    )
     conn.commit()
 
 

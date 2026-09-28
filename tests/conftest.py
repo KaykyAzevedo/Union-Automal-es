@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 # e NUNCA herdar credenciais de nuvem do ambiente (Neon, WhatsApp, cron, Vercel).
 os.environ["UNION_DISABLE_SCHEDULER"] = "1"
 os.environ["UNION_DISABLE_NOTIFY"] = "1"
+os.environ["UNION_DISABLE_LISTED_AT"] = "1"  # sem HEAD de fotos na rede (liga só em test_listed_at_enrich)
 for _var in ("UNION_MOCK_SCRAPER", "DATABASE_URL", "POSTGRES_URL", "DATABASE_URL_UNPOOLED",
              "POSTGRES_URL_NON_POOLING", "VERCEL", "APP_PASSWORD", "SESSION_SECRET",
              "CRON_SECRET", "WHATSAPP_PHONE", "CALLMEBOT_APIKEY", "APP_URL"):

@@ -33,7 +33,9 @@ def _run(kind: str, fn) -> dict | None:
                                       (kind, to_iso(now()))).lastrowid
                 conn.commit()
                 try:
-                    result = fn(conn, scraping.scrape_all())
+                    scraped = scraping.scrape_all()
+                    scraping.enrich_listed_at(conn, scraped)
+                    result = fn(conn, scraped)
                 except Exception as exc:
                     conn.rollback()
                     last_error[kind] = f"{type(exc).__name__}: {exc}"

@@ -8,13 +8,14 @@ from .matching import find_match, normalize_name
 from .sold import DEMO_PREFIX, track_missing
 
 
-def insert_car(conn: sqlite3.Connection, scraped, *, posted: bool, ts: str) -> int:
+def insert_car(conn: sqlite3.Connection, scraped, *, posted: bool, ts: str, baseline: bool = False) -> int:
     cur = conn.execute(
         """INSERT INTO cars (external_id, name, name_key, photo_url, price_cents, url,
-                             posted, active, first_seen, last_seen)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                             posted, active, first_seen, last_seen, in_baseline, listed_at, listed_at_checked)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)""",
         (scraped.external_id, scraped.name, normalize_name(scraped.name), scraped.photo_url,
-         scraped.price_cents, scraped.url, int(posted), ts, ts),
+         scraped.price_cents, scraped.url, int(posted), ts, ts, int(baseline), _listed_at(scraped),
+         getattr(scraped, "listed_at_checked", None)),
     )
     car_id = cur.lastrowid
     conn.execute(
@@ -24,14 +25,24 @@ def insert_car(conn: sqlite3.Connection, scraped, *, posted: bool, ts: str) -> i
     return car_id
 
 
+def _listed_at(scraped) -> str | None:
+    """Data real de cadastro no site (ScrapedCar.listed_at: date|None), se o scraper expuser."""
+    value = getattr(scraped, "listed_at", None)
+    if value is None:
+        return None
+    return value.isoformat()[:10] if hasattr(value, "isoformat") else str(value)[:10]
+
+
 def refresh_car(conn: sqlite3.Connection, car_id: int, scraped, ts: str) -> None:
     """Atualiza metadados e reativa. Preço fica para o job das 18:00."""
     conn.execute(
         """UPDATE cars SET external_id = ?, name = ?, name_key = ?,
-                  photo_url = COALESCE(?, photo_url), url = ?, active = 1, last_seen = ?
+                  photo_url = COALESCE(?, photo_url), url = ?, active = 1, last_seen = ?,
+                  listed_at = COALESCE(?, listed_at),
+                  listed_at_checked = COALESCE(?, listed_at_checked)
            WHERE id = ?""",
         (scraped.external_id, scraped.name, normalize_name(scraped.name), scraped.photo_url,
-         scraped.url, ts, car_id),
+         scraped.url, ts, _listed_at(scraped), getattr(scraped, "listed_at_checked", None), car_id),
     )
 
 
@@ -74,7 +85,7 @@ def run_poll(conn: sqlite3.Connection, scraped: list) -> dict:
         if car is not None:
             refresh_car(conn, car.id, item, ts)
             continue
-        car_id = insert_car(conn, item, posted=baseline, ts=ts)
+        car_id = insert_car(conn, item, posted=baseline, ts=ts, baseline=baseline)
         seen.add(car_id)
         if not baseline:
             conn.execute(

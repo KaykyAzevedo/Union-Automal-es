@@ -45,6 +45,19 @@ Testes: `pip install -r requirements-dev.txt` e depois `pytest`
 - Botões de admin no painel: *verificar agora* e *revisar preços agora*.
 - `GET /health` mostra os jobs agendados e as estatísticas.
 
+## Painel da Equipe (`/equipe`)
+
+Tela para os funcionários (celular), somente leitura: carros em estoque ordenados por
+dias em estoque, com sugestão de redução de preço. Regras em `app/services/aging.py`
+(constantes `TIERS`):
+
+- **Relógio** = dias desde a última redução de preço (subida não conta), ou desde a
+  entrada se nunca baixou. 30–44 dias → −3%; 45–59 → −5%; 60+ → −8%.
+- **Preço sugerido** arredondado para baixo terminando em 900 (R$ 126.003 → R$ 125.900).
+- **Entrada:** data de cadastro obtida do site quando disponível; senão o dia em que o app
+  viu o carro pela 1ª vez. Carros do registro inicial (1ª coleta) mostram
+  "há pelo menos X dias", porque a entrada real é anterior.
+
 ## Modo demo
 
 Para mostrar o painel com exemplos (chamados, queda de preço, vendido):
@@ -81,7 +94,12 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
     porque o Hobby só permite cron diário.
   - Respostas JSON: `200 {ok: true, job, result}`; falha no site → `502 {ok: false, error}`;
     Bearer errado → `401`; `CRON_SECRET` ausente → `503`.
-- **Login:** senha única (`APP_PASSWORD`). Na Vercel sem senha configurada o app responde 503.
+- **Login com dois perfis** (mesma tela; a senha decide o perfil):
+  - **admin** (`APP_PASSWORD`, social media): acesso total.
+  - **equipe** (`STAFF_PASSWORD`, funcionários): só o **Painel da Equipe** (`/equipe`, somente
+    leitura: dias em estoque e sugestões de redução de preço). Sem `STAFF_PASSWORD`, o perfil
+    equipe fica desativado. Trocar a senha derruba as sessões da equipe.
+  - Na Vercel sem `APP_PASSWORD` o app responde 503. Local sem senhas → tudo aberto (admin).
 - **Arquivos:** só `/tmp` é gravável (cache de fotos). O detalhe do anúncio fica em cache
   na tabela `detail_cache` (10 min), então as 11 prévias do editor fazem um único acesso
   ao site mesmo em instâncias diferentes.
@@ -93,7 +111,8 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
 | Variável | Obrigatória | Valor |
 |---|---|---|
 | `DATABASE_URL` | sim | Injetada pela integração Neon (aceita também `POSTGRES_URL`). Use a URL *pooled*. |
-| `APP_PASSWORD` | sim | Senha do painel. |
+| `APP_PASSWORD` | sim | Senha do painel (perfil admin). |
+| `STAFF_PASSWORD` | opcional | Senha dos funcionários (perfil equipe: só `/equipe`). Deve ser diferente da `APP_PASSWORD`. |
 | `SESSION_SECRET` | sim | Texto aleatório longo (assina o cookie de login). |
 | `CRON_SECRET` | sim | Texto aleatório com 16+ caracteres (a Vercel Cron envia no header). |
 | `APP_URL` | recomendada | URL de produção, ex. `https://union-painel.vercel.app` (links no WhatsApp). |
@@ -105,7 +124,7 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
 1. Suba o repositório para o GitHub e importe o projeto na Vercel (Framework: FastAPI,
    detectado sozinho). Não precisa de Build Command.
 2. **Storage → Neon → Create/Connect** e conecte ao projeto (isso cria `DATABASE_URL`).
-3. Cadastre `APP_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, `APP_URL` (e, se quiser,
+3. Cadastre `APP_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, `APP_URL`, `STAFF_PASSWORD` (e, se quiser,
    `WHATSAPP_PHONE` + `CALLMEBOT_APIKEY`). Faça **Redeploy** depois de mudar variáveis.
 4. **Deployment Protection:** se a proteção (Vercel Authentication) estiver ligada no
    domínio de produção, o GitHub Actions leva 401 em `/cron/poll`. Deixe a produção

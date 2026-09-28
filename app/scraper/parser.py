@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
@@ -30,6 +31,7 @@ class ScrapedCar:
     price_cents: int | None
     photo_url: str | None
     url: str
+    listed_at: date | None = None  # preenchido só por fill_listed_at (1 HEAD por carro)
 
 
 def _clean(text: str) -> str:

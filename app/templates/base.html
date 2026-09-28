@@ -20,19 +20,24 @@
     })();
   </script>
 </head>
-<body class="{% block body_class %}{% endblock %}">
+{# role: 'admin' | 'staff' | None (local sem senha = acesso total, como admin) #}
+{% set is_staff = role is defined and role == 'staff' %}
+<body class="{% block body_class %}{% endblock %}{{ ' role-staff' if is_staff }}">
   <header class="topbar">
     <div class="container topbar-inner">
-      <a class="brand" href="/">
+      <a class="brand" href="{{ '/equipe' if is_staff else '/' }}">
         <img class="brand-logo" src="/static/logo-dark.png" alt="Union Veículos" width="166" height="40">
-        <span class="brand-text">Social Media</span>
+        <span class="brand-text">{{ 'Equipe' if is_staff else 'Social Media' }}</span>
       </a>
       <nav class="nav">
         {% block nav %}
         {% set path = request.url.path if request is defined else '' %}
+        {% if not is_staff %}
         <a href="/" class="{{ 'active' if path == '/' }}">Painel</a>
         <a href="/cars" class="{{ 'active' if path.startswith('/cars') }}">Estoque</a>
         <a href="/editor" class="{{ 'active' if path.startswith('/editor') }}">Editor</a>
+        {% endif %}
+        <a href="/equipe" class="{{ 'active' if path.startswith('/equipe') }}">Equipe</a>
         {% if auth_enabled is defined and auth_enabled %}
         <form method="post" action="/logout" class="logout-form">
           <button type="submit" class="nav-logout" title="Sair do painel">Sair</button>
@@ -50,7 +55,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="container footer">Union Veículos · Social Media</footer>
+  <footer class="container footer">Union Veículos · {{ 'Equipe' if is_staff else 'Social Media' }}</footer>
 
   <script>
     document.getElementById('theme-toggle').addEventListener('click', function () {

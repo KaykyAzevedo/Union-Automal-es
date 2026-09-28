@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
 
 from ._http import ScraperError, fetch, new_client
+from .listed_at import fetch_listed_at
 from .parser import BASE_URL, PLACEHOLDER_PHOTO_MARKERS, parse_price_cents
 
 # Marcas com mais de uma palavra, para quando o slug não resolver a separação.
@@ -55,6 +57,7 @@ class CarDetail:
     info_text: str | None = None  # bloco "Informações do Veículo", linhas separadas por \n
     armored: bool = False
     armor_company: str | None = None  # "Security", "GR Vidros Eternity"
+    listed_at: date | None = None  # envio da foto principal (>= cadastro); só em scrape_detail
 
 
 def _clean(text: str) -> str:
@@ -277,10 +280,12 @@ def scrape_detail(url: str, client: httpx.Client | None = None) -> CarDetail:
     client = client or new_client()
     try:
         resp = fetch(client, url)
+        final_path = urlsplit(str(resp.url)).path
+        if not _DETAIL_PATH_RE.search(final_path):
+            raise ScraperError(f"anúncio não encontrado (redirecionou para {final_path}): {url}")
+        detail = parse_detail(resp.text, url)
+        detail.listed_at = fetch_listed_at(detail.photos[0] if detail.photos else None, client)
+        return detail
     finally:
         if owns_client:
             client.close()
-    final_path = urlsplit(str(resp.url)).path
-    if not _DETAIL_PATH_RE.search(final_path):
-        raise ScraperError(f"anúncio não encontrado (redirecionou para {final_path}): {url}")
-    return parse_detail(resp.text, url)

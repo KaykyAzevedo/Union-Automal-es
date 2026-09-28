@@ -79,7 +79,7 @@ def test_login_ok_sets_cookie_and_opens_panel(client, locked):
     r = _login(client, next_="/cars")
     assert r.status_code == 303 and r.headers["location"] == "/cars"
     cookie = r.headers["set-cookie"]
-    assert cookie.startswith(f"{auth.COOKIE_NAME}=v1.")
+    assert cookie.startswith(f"{auth.COOKIE_NAME}=v2.admin.")
     low = cookie.lower()
     assert "httponly" in low and "samesite=lax" in low and "max-age" in low
     assert "secure" not in low  # http local

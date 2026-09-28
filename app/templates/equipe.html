@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import price, photo %}
+{% block title %}Equipe{% endblock %}
+{% block body_class %}page-equipe{% endblock %}
+
+{# preço "cheio" sem centavos: R$ 125.900,00 → R$ 125.900 #}
+{% macro short_price(cents) -%}
+  {%- if cents is none -%}Sob consulta{%- else -%}{{ (cents | brl) | replace(',00', '') }}{%- endif -%}
+{%- endmacro %}
+{% macro days_word(n) -%}{{ n }} dia{{ 's' if n != 1 }}{%- endmacro %}
+
+{% block content %}
+{% set s = summary %}
+<section class="page-head">
+  <div>
+    <h1>Estoque da loja</h1>
+    <p class="muted">Carros à venda no site, do mais antigo para o mais novo.</p>
+  </div>
+</section>
+
+<section class="team-stats" aria-label="Resumo do estoque">
+  <div class="tstat">
+    <span class="tstat-value">{{ s.in_stock }}</span>
+    <span class="tstat-label">Em estoque</span>
+  </div>
+  <div class="tstat tstat-ok">
+    <span class="tstat-value">{{ s.posted }}</span>
+    <span class="tstat-label">Postados no Instagram</span>
+  </div>
+  <div class="tstat tstat-wait">
+    <span class="tstat-value">{{ s.pending }}</span>
+    <span class="tstat-label">Aguardando post</span>
+  </div>
+  <div class="tstat">
+    <span class="tstat-value">{{ s.avg_days | round | int if s.avg_days is not none else '—' }}<small> dias</small></span>
+    <span class="tstat-label">Média em estoque</span>
+  </div>
+  <div class="tstat tstat-warn">
+    <span class="tstat-value">{{ s.over_30 }}</span>
+    <span class="tstat-label">Há +30 dias</span>
+  </div>
+  <div class="tstat tstat-alert">
+    <span class="tstat-value">{{ s.over_60 }}</span>
+    <span class="tstat-label">Há +60 dias</span>
+  </div>
+</section>
+
+{% if cars %}
+{% set ns = namespace(sugg=0, old=0) %}
+{% for car in cars %}
+  {% if car.suggestion %}{% set ns.sugg = ns.sugg + 1 %}{% endif %}
+  {% if car.days_in_stock is not none and car.days_in_stock >= 60 %}{% set ns.old = ns.old + 1 %}{% endif %}
+{% endfor %}
+
+<div class="team-tools">
+  <input type="search" id="team-search" class="input" placeholder="Buscar carro…" aria-label="Buscar carro">
+  <div class="filters" role="group" aria-label="Filtrar carros">
+    <button type="button" class="chip active" data-filter="all" aria-pressed="true">Todos <span>{{ cars | length }}</span></button>
+    <button type="button" class="chip" data-filter="sugg" aria-pressed="false">Com sugestão <span>{{ ns.sugg }}</span></button>
+    <button type="button" class="chip" data-filter="old" aria-pressed="false">+60 dias <span>{{ ns.old }}</span></button>
+  </div>
+</div>
+
+<ul class="team-list">
+  {% for car in cars %}
+  {% set d = car.days_in_stock if car.days_in_stock is not none else 0 %}
+  {% set age = 'old' if d >= 60 else ('mid' if d >= 30 else 'new') %}
+  <li class="team-car card age-{{ age }}"
+      data-name="{{ car.name | lower }}"
+      data-sugg="{{ 1 if car.suggestion else 0 }}"
+      data-days="{{ d }}">
+    <div class="team-photo">
+      {{ photo(car, 'team-img') }}
+      <span class="badge {{ 'badge-posted' if car.posted else 'badge-wait' }}">{{ 'Postado' if car.posted else 'Aguardando post' }}</span>
+    </div>
+    <div class="team-body">
+      <h2 class="team-name">{{ car.name }}</h2>
+      <p class="team-price">{{ short_price(car.price_cents) }}</p>
+      <p class="team-days">
+        <span class="days-pill">
+          ⏱ {% if car.since_is_estimate %}há pelo menos {{ days_word(d) }}{% else %}{{ days_word(d) }} em estoque{% endif %}
+        </span>
+        {% if car.since %}<span class="muted small">{{ 'desde antes de' if car.since_is_estimate else 'desde' }} {{ car.since.strftime('%d/%m/%Y') if car.since is not string else car.since }}</span>{% endif %}
+      </p>
+      {% if car.last_price_change %}
+      <p class="muted small">Último ajuste de preço há {{ days_word(car.days_since_price_change) }}</p>
+      {% endif %}
+
+      {% if car.suggestion %}
+      {% set sg = car.suggestion %}
+      <div class="suggestion">
+        <p class="suggestion-main">💡 Sugestão: baixar {{ sg.pct }}% → <strong>{{ short_price(sg.new_price_cents) }}</strong></p>
+        {% if sg.reason %}<p class="suggestion-reason">{{ sg.reason }}</p>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+<div class="empty team-none" id="team-none" hidden>
+  <p><strong>Nenhum carro encontrado.</strong></p>
+  <p class="muted">Tente outro nome ou mude o filtro.</p>
+</div>
+
+<script>
+  (function () {
+    var search = document.getElementById('team-search');
+    var chips = document.querySelectorAll('.team-tools .chip');
+    var none = document.getElementById('team-none');
+    var filter = 'all';
+    function apply() {
+      var q = search.value.trim().toLowerCase(), shown = 0;
+      document.querySelectorAll('.team-car').forEach(function (li) {
+        var ok = (!q || li.dataset.name.indexOf(q) !== -1) &&
+                 (filter === 'all' ||
+                  (filter === 'sugg' && li.dataset.sugg === '1') ||
+                  (filter === 'old' && +li.dataset.days >= 60));
+        li.hidden = !ok;
+        if (ok) shown++;
+      });
+      none.hidden = shown > 0;
+    }
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chips.forEach(function (c) { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
+        chip.classList.add('active'); chip.setAttribute('aria-pressed', 'true');
+        filter = chip.dataset.filter;
+        apply();
+      });
+    });
+    search.addEventListener('input', apply);
+  })();
+</script>
+{% else %}
+<div class="empty">
+  <div class="empty-icon">🚗</div>
+  <p><strong>Nenhum carro em estoque no momento.</strong></p>
+  <p class="muted">A lista é atualizada automaticamente a partir do site.</p>
+</div>
+{% endif %}
+{% endblock %}
