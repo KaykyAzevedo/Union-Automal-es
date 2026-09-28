@@ -1,6 +1,7 @@
 """App FastAPI: painel da social media da Union Veículos."""
 from __future__ import annotations
 
+import hmac
 import io
 import logging
 import os
@@ -11,13 +12,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import db
 from .services import queries
 from .services.formatting import brl, dt
+from .services import jobs
 from .services.jobs import poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
@@ -40,9 +42,12 @@ FLASH = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if db.is_vercel() and not db.database_url():
+        log.error("VERCEL sem DATABASE_URL/POSTGRES_URL: usando SQLite em /tmp (dados se perdem a cada instância!)")
     db.init_db()
     scheduler = None
-    if os.environ.get("UNION_DISABLE_SCHEDULER") != "1":
+    # Na Vercel não há processo contínuo: jobs vêm de /cron/* (Vercel Cron + agendador externo)
+    if os.environ.get("UNION_DISABLE_SCHEDULER") != "1" and not db.is_vercel():
         from .scheduler import create_scheduler
 
         scheduler = create_scheduler()
@@ -59,6 +64,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Union Veículos — Painel", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static"), check_dir=False), name="static")
+
+from .auth import install_auth  # noqa: E402  (login/logout, sessão, global Jinja auth_enabled)
+
+install_auth(app, templates)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -142,11 +151,11 @@ def _car_or_404(conn, car_id: int):
     return car
 
 
-def _detail_or_502(car):
+def _detail_or_502(car, conn):
     from .scraper import ScraperError
 
     try:
-        return encarte_source.get_detail(car)
+        return encarte_source.get_detail(car, conn)
     except ScraperError as exc:
         log.warning("502 encarte car=%s: scrape_detail falhou: %s", car.id, exc)
         raise HTTPException(502, f"Falha ao ler o anúncio: {exc}") from exc
@@ -200,7 +209,7 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
     car = _car_or_404(conn, car_id)
     ctx = {"cars": queries.active_cars(conn), "selected": None, "car": car}
     try:
-        detail = encarte_source.get_detail(car)
+        detail = encarte_source.get_detail(car, conn)
     except ScraperError as exc:
         log.warning("editor car=%s: scrape_detail falhou: %s", car.id, exc)
         ctx["error"] = f"Não foi possível ler o anúncio no site: {exc}"
@@ -216,7 +225,7 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
 
 @app.get("/encarte/{car_id}/slide/{n}.png")
 def encarte_slide(car_id: int, n: int, photos: str | None = None, conn=Depends(db.get_conn)):
-    detail = _detail_or_502(_car_or_404(conn, car_id))
+    detail = _detail_or_502(_car_or_404(conn, car_id), conn)
     urls = _chosen_urls(detail, photos)
     if not 0 <= n < len(urls):
         raise HTTPException(404, "Slide inexistente")
@@ -226,7 +235,7 @@ def encarte_slide(car_id: int, n: int, photos: str | None = None, conn=Depends(d
 
 @app.get("/encarte/{car_id:int}.zip")
 def encarte_zip(car_id: int, photos: str | None = None, conn=Depends(db.get_conn)):
-    detail = _detail_or_502(_car_or_404(conn, car_id))
+    detail = _detail_or_502(_car_or_404(conn, car_id), conn)
     urls = _chosen_urls(detail, photos)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # PNG já é comprimido
@@ -240,5 +249,36 @@ def encarte_zip(car_id: int, photos: str | None = None, conn=Depends(db.get_conn
 
 @app.get("/encarte/{car_id}/caption.txt", response_class=PlainTextResponse)
 def encarte_caption(car_id: int, conn=Depends(db.get_conn)):
-    return PlainTextResponse(build_caption(_detail_or_502(_car_or_404(conn, car_id))),
+    return PlainTextResponse(build_caption(_detail_or_502(_car_or_404(conn, car_id), conn)),
                              media_type="text/plain; charset=utf-8")
+
+
+# ---- F5: jobs via HTTP (Vercel Cron / agendador externo) -------------------------
+
+def _cron(request: Request, kind: str, job) -> JSONResponse:
+    secret = os.environ.get("CRON_SECRET")
+    if not secret:
+        return JSONResponse({"ok": False, "job": kind, "error": "CRON_SECRET não configurado"}, status_code=503)
+    given = request.headers.get("authorization", "")
+    if not hmac.compare_digest(given.encode(), f"Bearer {secret}".encode()):
+        return JSONResponse({"ok": False, "job": kind, "error": "não autorizado"}, status_code=401)
+    result = job()
+    if result is None and jobs.busy.get(kind):
+        return JSONResponse({"ok": False, "job": kind, "error": jobs.last_error.get(kind)}, status_code=409)
+    if result is None:
+        error = jobs.last_error.get(kind, "falha desconhecida")
+        log.warning("cron %s falhou: %s", kind, error)
+        return JSONResponse({"ok": False, "job": kind, "error": error}, status_code=502)
+    return JSONResponse({"ok": True, "job": kind, "result": result})
+
+
+@app.get("/cron/poll")
+def cron_poll(request: Request):
+    """Carros novos/vendidos. Idempotente. Chamado a cada 15 min pelo agendador externo."""
+    return _cron(request, "poll", poll_job)
+
+
+@app.get("/cron/price-check")
+def cron_price_check(request: Request):
+    """Revisão de preços. Idempotente. Vercel Cron diário 21:00 UTC (18:00 BRT)."""
+    return _cron(request, "price_check", price_check_job)

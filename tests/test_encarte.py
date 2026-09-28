@@ -271,7 +271,7 @@ def test_editor_car_ok(client, cars, scrape):
     r = client.get(f"/editor/{cars['5575766']}")
     assert r.status_code == 200
     assert "TRACKER" in r.text and "1.0 TURBO FLEX LTZ AUTOMÁTICO" in r.text
-    assert f'/encarte/{cars["5575766"]}.zip' in r.text
+    assert 'id="zip-btn"' in r.text and "zipParts" in r.text  # F5: ZIP montado no navegador (JSZip)
     assert r.text.count("autocerto.com/fotos/339/5575766/") >= 11
     assert "None" not in r.text
 
@@ -288,7 +288,7 @@ def test_editor_car_without_photos_renders(client, cars, scrape):
     assert r.status_code == 200
     assert "320i" in r.text and "Sob consulta" in r.text
     assert "Anúncio sem fotos no site" in r.text
-    assert 'id="zip-link"' not in r.text
+    assert 'id="zip-link"' not in r.text and 'id="zip-btn"' not in r.text
     assert f'/encarte/{cars["5555997"]}.zip' not in r.text
     assert 'id="caption"' in r.text  # legenda continua disponível
 

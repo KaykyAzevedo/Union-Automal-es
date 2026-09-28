@@ -182,13 +182,11 @@ def test_poll_job_notifies_sold(client, site, car, monkeypatch):
     from app.services import jobs
 
     calls = []
-    monkeypatch.setattr(jobs, "notify", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(jobs, "notify_sold", lambda names: calls.append(list(names)))
     site.cars = [car("1"), car("2", "Compass 2022")]
     client.post("/admin/check-now")
     site.cars = [car("1")]
     client.post("/admin/check-now")
-    assert calls == []
+    assert [c for c in calls if c] == []
     client.post("/admin/check-now")
-    assert len(calls) == 1
-    assert "vendid" in " ".join(map(str, calls[0])).lower()
-    assert "Compass 2022" in " ".join(map(str, calls[0]))
+    assert [c for c in calls if c] == [["Compass 2022"]]

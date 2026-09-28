@@ -1,0 +1,50 @@
+# Verifica carros novos no site a cada 15 min chamando o app na Vercel.
+# A Vercel Hobby só permite cron diário, por isso o agendamento fica aqui.
+#
+# Configurar em GitHub > Settings > Secrets and variables > Actions > New repository secret:
+#   APP_URL      endereço do app, ex.: https://union-painel.vercel.app
+#   CRON_SECRET  o mesmo valor da variável CRON_SECRET na Vercel
+#
+# Observações:
+# - O GitHub pode atrasar execuções agendadas em alguns minutos em horários de pico.
+# - Em repositórios sem atividade por 60 dias o GitHub desliga o agendamento;
+#   basta reativar em Actions > Poll estoque > Enable workflow.
+# - Para rodar na hora: Actions > Poll estoque > Run workflow.
+name: Poll estoque
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: poll-estoque
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Chamar /cron/poll
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Configure os secrets APP_URL e CRON_SECRET do repositório."
+            exit 1
+          fi
+          url="${APP_URL%/}/cron/poll"
+          status=$(curl -sS -o response.json -w '%{http_code}' \
+            --max-time 120 --retry 2 --retry-delay 15 --retry-all-errors \
+            -H "Authorization: Bearer $CRON_SECRET" "$url") || status=000
+          echo "HTTP $status"
+          cat response.json 2>/dev/null || true
+          echo
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::/cron/poll respondeu HTTP $status"
+            exit 1
+          fi

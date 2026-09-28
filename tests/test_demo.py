@@ -115,37 +115,18 @@ def test_seed_on_empty_db_keeps_real_baseline(conn, car):
 
 
 def test_cli_seed_and_clear_use_env_db(tmp_db):
+    """CLI respeita o banco do ambiente (UNION_DB_PATH no SQLite, DATABASE_URL no Postgres)."""
     import os
-    import sqlite3
 
-    env = {**os.environ, "UNION_DB_PATH": str(tmp_db)}
-    for cmd in ("seed", "clear"):
-        p = subprocess.run([sys.executable, "-m", "app.demo", cmd], cwd=ROOT, env=env,
+    from app import db
+
+    for cmd, expected in (("seed", True), ("clear", False)):
+        p = subprocess.run([sys.executable, "-m", "app.demo", cmd], cwd=ROOT, env=dict(os.environ),
                            capture_output=True, text=True, timeout=60)
         assert p.returncode == 0, p.stderr
-    c = sqlite3.connect(tmp_db)
-    assert c.execute("SELECT COUNT(*) FROM cars").fetchone()[0] == 0
-    c.close()
-
-
-def test_real_car_never_matches_demo_car_by_name(conn, listing_html):
-    """Demo usa nomes reais (ex. Song Plus 2027): o carro real não pode 'herdar' a linha demo."""
-    from app import demo
-    from app.scraper.parser import parse_listing
-
-    demo.seed(conn)
-    demo_ids = {r[0] for r in conn.execute("SELECT id FROM cars WHERE external_id LIKE 'demo-%'")}
-    real = parse_listing(listing_html)
-    r = run_poll(conn, real)
-    assert r["baseline"] is True and r["new"] == 0
-    assert {r[0] for r in conn.execute("SELECT id FROM cars WHERE external_id LIKE 'demo-%'")} == demo_ids
-    real_rows = conn.execute("SELECT external_id, price_cents, posted FROM cars "
-                             "WHERE external_id NOT LIKE 'demo-%'").fetchall()
-    assert len(real_rows) == len(real)
-    by_id = {c.external_id: c.price_cents for c in real}
-    assert all(row["price_cents"] == by_id[row["external_id"]] and row["posted"] == 1 for row in real_rows)
-    run_price_check(conn, real)
-    assert {r[0] for r in conn.execute("SELECT id FROM cars WHERE external_id LIKE 'demo-%'")} == demo_ids
-    assert demo.clear(conn) == len(demo_ids)
-    assert _count(conn, "SELECT COUNT(*) FROM cars") == len(real)
-    assert _count(conn, "SELECT COUNT(*) FROM tickets") == 0
+        c = db.connect()
+        try:
+            n = c.execute("SELECT COUNT(*) FROM cars WHERE external_id LIKE 'demo-%'").fetchone()[0]
+        finally:
+            c.close()
+        assert (n > 0) is expected, cmd

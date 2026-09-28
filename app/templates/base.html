@@ -8,6 +8,7 @@
   <link rel="icon" href="/static/logo.png">
   <title>{% block title %}Painel{% endblock %} · Union Veículos</title>
   <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
   <script>
     // Aplica o tema salvo antes de pintar a página (evita "piscar").
@@ -19,7 +20,7 @@
     })();
   </script>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header class="topbar">
     <div class="container topbar-inner">
       <a class="brand" href="/">
@@ -27,10 +28,17 @@
         <span class="brand-text">Social Media</span>
       </a>
       <nav class="nav">
+        {% block nav %}
         {% set path = request.url.path if request is defined else '' %}
         <a href="/" class="{{ 'active' if path == '/' }}">Painel</a>
         <a href="/cars" class="{{ 'active' if path.startswith('/cars') }}">Estoque</a>
         <a href="/editor" class="{{ 'active' if path.startswith('/editor') }}">Editor</a>
+        {% if auth_enabled is defined and auth_enabled %}
+        <form method="post" action="/logout" class="logout-form">
+          <button type="submit" class="nav-logout" title="Sair do painel">Sair</button>
+        </form>
+        {% endif %}
+        {% endblock %}
         <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro" title="Alternar tema">
           <span class="icon-sun">☀</span><span class="icon-moon">☾</span>
         </button>
@@ -42,7 +50,7 @@
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="container footer">Union Veículos · painel local</footer>
+  <footer class="container footer">Union Veículos · Social Media</footer>
 
   <script>
     document.getElementById('theme-toggle').addEventListener('click', function () {

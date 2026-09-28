@@ -100,7 +100,10 @@
       <div class="card panel">
         <div class="panel-head">
           <h2 class="section-title">Prévia <span class="muted small" id="preview-status"></span></h2>
-          <a class="btn btn-primary" id="zip-link" href="/encarte/{{ sel_id }}.zip" download>⬇ Baixar ZIP</a>
+          <div class="zip-box">
+            <span class="zip-status" id="zip-status" role="status" aria-live="polite"></span>
+            <button type="button" class="btn btn-primary" id="zip-btn">⬇ Baixar ZIP</button>
+          </div>
         </div>
         <div class="slides" id="slides"></div>
       </div>
@@ -122,6 +125,7 @@
       <script>
         window.ENCARTE = {
           carId: {{ sel_id | tojson }},
+          zipParts: [{{ (d.brand if d and d.brand else '') | tojson }}, {{ (d.model if d and d.model else sel.car.name) | tojson }}, {{ ((d.year_model or d.year_fab or '') if d else '') | tojson }}],
           photos: [{% for p in sel.photos %}{"index": {{ p.index | int }}, "url": {{ p.url | tojson }}}{{ "," if not loop.last }}{% endfor %}]
         };
       </script>
@@ -179,7 +183,6 @@
   var chosenEl = document.getElementById('chosen');
   var othersEl = document.getElementById('others');
   var slidesEl = document.getElementById('slides');
-  var zipLink = document.getElementById('zip-link');
   var status = document.getElementById('preview-status');
   var dragFrom = null;
 
@@ -286,20 +289,36 @@
     }
   }
 
+  function bust(url, n) { return url + '&_r=' + n + '-' + Date.now(); }
+
+  // Busca um slide como Blob PNG. Erro HTTP ou resposta que não é imagem viram exceção.
+  function fetchPng(url, fresh) {
+    return fetch(url, { cache: fresh ? 'no-store' : 'default', credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var type = r.headers.get('content-type') || '';
+      if (type.indexOf('image/') !== 0) throw new Error('resposta inesperada (' + (type || 'sem tipo') + ')');
+      return r.blob();
+    });
+  }
+
   // Cada job ocupa um slot só enquanto a requisição está em andamento; na espera
   // do retry o slot fica livre e o job volta para o início da fila.
   function makeJob(slide, tryN) {
     var myGen = gen, n = tryN || 0;
     return { gen: myGen, run: function () {
       function release() { if (myGen === gen) active = Math.max(0, active - 1); pump(); }
-      var img = slide.img;
-      img.onload = function () {
+      var fresh = n > 0 || slide.manual;
+      // cache-buster só nas novas tentativas, para não reaproveitar a resposta com erro
+      fetchPng(fresh ? bust(slide.src, n) : slide.src, fresh).then(function (blob) {
         if (myGen !== gen) return release();
+        slide.blob = blob;
+        slide.objUrl = URL.createObjectURL(blob);
+        slide.img.src = slide.objUrl;
+        slide.dl.href = slide.objUrl;
         slide.fig.classList.remove('is-loading', 'is-retrying');
         slide.note.textContent = '';
         pending = Math.max(0, pending - 1); setStatus(); release();
-      };
-      img.onerror = function () {
+      }).catch(function () {
         if (myGen !== gen) return release();
         if (n < RETRY_DELAYS.length) {
           slide.fig.classList.add('is-retrying');
@@ -314,9 +333,7 @@
         slide.fig.classList.remove('is-loading', 'is-retrying');
         slide.fig.classList.add('is-error');
         pending = Math.max(0, pending - 1); failed++; setStatus(); release();
-      };
-      // cache-buster só nas novas tentativas, para não reaproveitar a resposta com erro
-      img.src = slide.src + (n > 0 || slide.manual ? '&_r=' + n + '-' + Date.now() : '');
+      });
     } };
   }
 
@@ -325,11 +342,14 @@
     pump();
   }
 
+  var slides = [];  // slides da geração atual (o ZIP lê daqui)
+
   function renderSlides() {
     gen++;
     queue = []; active = 0; failed = 0; pending = chosen.length;
+    slides.forEach(function (sl) { if (sl.objUrl) URL.revokeObjectURL(sl.objUrl); });
+    slides = [];
     var q = qs();
-    zipLink.href = '/encarte/' + cfg.carId + '.zip?' + q;
     slidesEl.innerHTML = '';
     chosen.forEach(function (_, n) {
       var src = '/encarte/' + cfg.carId + '/slide/' + n + '.png?' + q;
@@ -344,7 +364,8 @@
       var retry = document.createElement('button');
       retry.type = 'button'; retry.className = 'btn btn-sm btn-primary slide-retry';
       retry.textContent = '↻ Tentar de novo';
-      var slide = { fig: fig, img: img, note: note, src: src };
+      var slide = { n: n, fig: fig, img: img, note: note, src: src, blob: null, objUrl: null, dl: null };
+      slides.push(slide);
       retry.addEventListener('click', function () {
         fig.classList.remove('is-error'); fig.classList.add('is-loading');
         note.textContent = '';
@@ -365,6 +386,7 @@
       var dl = document.createElement('a');
       dl.href = src; dl.download = pad(n) + '.png';
       dl.className = 'btn btn-ghost btn-sm'; dl.textContent = '⬇ Baixar';
+      slide.dl = dl;
       cap.appendChild(name); cap.appendChild(dl);
       fig.appendChild(frame); fig.appendChild(cap);
       slidesEl.appendChild(fig);
@@ -410,6 +432,118 @@
     } else {
       ta.select(); document.execCommand('copy'); ok();
     }
+  });
+
+  // ----- ZIP montado no navegador (na Vercel a resposta da função é limitada a 4,5 MB) -----
+  var JSZIP_SRC = [
+    'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+    'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+  ];
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var el = document.createElement('script');
+      el.src = src; el.async = true;
+      el.onload = resolve;
+      el.onerror = function () { el.remove(); reject(new Error('não carregou ' + src)); };
+      document.head.appendChild(el);
+    });
+  }
+  function loadJSZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    return loadScript(JSZIP_SRC[0])
+      .catch(function () { return loadScript(JSZIP_SRC[1]); })
+      .then(function () {
+        if (!window.JSZip) throw new Error('biblioteca de ZIP indisponível');
+        return window.JSZip;
+      });
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function fetchPngRetry(url, n) {
+    n = n || 0;
+    return fetchPng(n ? bust(url, n) : url, n > 0).catch(function (err) {
+      if (n >= RETRY_DELAYS.length) throw err;
+      return wait(RETRY_DELAYS[n]).then(function () { return fetchPngRetry(url, n + 1); });
+    });
+  }
+  function slugify(parts) {
+    return parts.filter(function (p) { return p !== null && p !== undefined && String(p).trim(); })
+      .join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+  function saveBlob(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+
+  var zipBtn = document.getElementById('zip-btn');
+  var zipStatus = document.getElementById('zip-status');
+  var zipBusy = false;
+  function zipState(text, kind) {
+    zipStatus.textContent = text;
+    zipStatus.className = 'zip-status' + (kind ? ' is-' + kind : '');
+  }
+
+  if (zipBtn) zipBtn.addEventListener('click', function () {
+    if (zipBusy) return;
+    zipBusy = true;
+    zipBtn.disabled = true;
+    var snapshot = slides.slice();          // ordem atual, mesmo que o usuário mexa durante o download
+    var total = snapshot.length, got = 0, next = 0;
+    var files = new Array(total);
+    var baseName = slugify(cfg.zipParts || []) || ('encarte-' + cfg.carId);
+    zipState('Preparando…');
+
+    function worker() {
+      if (next >= total) return Promise.resolve();
+      var sl = snapshot[next++];
+      var p = sl.blob ? Promise.resolve(sl.blob) : fetchPngRetry(sl.src).then(function (blob) {
+        if (!sl.blob) sl.blob = blob;       // aproveita na prévia se ela ainda não tinha carregado
+        return blob;
+      });
+      return p.then(function (blob) {
+        files[sl.n] = blob;
+        got++;
+        zipState('Baixando imagens: ' + got + ' de ' + total + '…');
+        return worker();
+      }, function (err) {
+        err.slide = sl.n;
+        throw err;
+      });
+    }
+
+    var caption = captionEl.value.trim()
+      ? Promise.resolve(captionEl.value)
+      : fetch('/encarte/' + cfg.carId + '/caption.txt', { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.text() : ''; }).catch(function () { return ''; });
+
+    Promise.all([loadJSZip(), caption]).then(function (res) {
+      var JSZip = res[0], text = res[1];
+      zipState('Baixando imagens: 0 de ' + total + '…');
+      var workers = [];
+      for (var i = 0; i < Math.min(CONCURRENCY, total); i++) workers.push(worker());
+      return Promise.all(workers).then(function () {
+        zipState('Compactando…');
+        var zip = new JSZip();
+        files.forEach(function (blob, i) { zip.file(pad(i) + '.png', blob); });
+        if (text) zip.file('legenda.txt', text.replace(/\r?\n/g, '\r\n'));
+        // PNG já é comprimido: STORE deixa a montagem instantânea
+        return zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      });
+    }).then(function (blob) {
+      saveBlob(blob, baseName + '.zip');
+      zipState('✓ ' + baseName + '.zip pronto (' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB)', 'ok');
+    }).catch(function (err) {
+      var msg = err && err.slide !== undefined
+        ? 'Falha ao baixar a imagem ' + pad(err.slide) + ' (' + err.message + '). Tente de novo.'
+        : 'Não foi possível montar o ZIP: ' + (err && err.message ? err.message : 'erro desconhecido') + '.';
+      zipState(msg, 'error');
+    }).then(function () {
+      zipBusy = false;
+      zipBtn.disabled = false;
+    });
   });
 
   // Sem fotos: não há prévia nem ZIP (as rotas devolvem 422).

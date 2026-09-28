@@ -24,7 +24,9 @@ from ..db import BASE_DIR
 
 log = logging.getLogger(__name__)
 
-CACHE_DIR = Path(os.environ.get("UNION_DATA_DIR") or BASE_DIR / "data") / "cache" / "photos"
+# Vercel: só /tmp é gravável (efêmero, por instância)
+_DATA_DIR = os.environ.get("UNION_DATA_DIR") or ("/tmp/union" if os.environ.get("VERCEL") == "1" else BASE_DIR / "data")
+CACHE_DIR = Path(_DATA_DIR) / "cache" / "photos"
 HEADERS = {"User-Agent": "Mozilla/5.0 (UnionPainel)"}
 SITE_CONCURRENCY = 3
 SITE_SEMAPHORE = threading.BoundedSemaphore(SITE_CONCURRENCY)

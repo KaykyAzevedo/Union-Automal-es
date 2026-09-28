@@ -1,18 +1,23 @@
-"""Detalhe do anúncio para o encarte, com cache em memória (~10 min).
+"""Detalhe do anúncio para o encarte, com cache em memória + banco (~10 min).
 
 Usa app.scraper.detail.scrape_detail (Lupa). FakeCarDetail/TRACKER_SAMPLE
 servem só para amostras e testes offline.
 """
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
+from .. import db
 from ..models import Car
 from .photos import SITE_SEMAPHORE, key_lock
 
+log = logging.getLogger(__name__)
 TTL_SECONDS = 600
+DETAIL_LOCK_WAIT = 8.0
 _cache: dict[str, tuple[float, object]] = {}
 _lock = threading.Lock()
 _car_locks: dict[str, threading.Lock] = {}
@@ -66,22 +71,73 @@ def _cached(key: str):
     return None
 
 
-def get_detail(car: Car):
-    """CarDetail do carro, cacheado por TTL_SECONDS e single-flight por carro:
-    11 slides pedidos juntos geram UM scrape. Propaga ScraperError."""
+def _decode(data: str):
+    try:
+        from ..scraper.detail import CarDetail as cls
+    except ImportError:  # pragma: no cover
+        cls = FakeCarDetail
+    raw = json.loads(data)
+    names = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in raw.items() if k in names})
+
+
+def _db_get(conn, key: str):
+    row = conn.execute("SELECT data, fetched_at FROM detail_cache WHERE external_id = ?", (key,)).fetchone()
+    if row is None:
+        return None
+    fetched = db.from_iso(row["fetched_at"])
+    if fetched is None or (db.now() - fetched).total_seconds() >= TTL_SECONDS:
+        return None
+    try:
+        return _decode(row["data"])
+    except (ValueError, TypeError):  # linha corrompida/formato antigo: trata como ausente
+        log.warning("detail_cache inválido para %s; raspando de novo", key)
+        return None
+
+
+def _db_put(conn, key: str, detail) -> None:
+    conn.execute(
+        """INSERT INTO detail_cache (external_id, data, fetched_at) VALUES (?, ?, ?)
+           ON CONFLICT (external_id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at""",
+        (key, json.dumps(asdict(detail), ensure_ascii=False), db.to_iso(db.now())),
+    )
+    conn.commit()
+
+
+def get_detail(car: Car, conn=None):
+    """CarDetail do carro. Camadas: memória → tabela detail_cache (TTL_SECONDS,
+    compartilhada entre instâncias da Vercel) → scrape. Single-flight por carro no
+    processo (lock) e entre instâncias (pg_advisory_lock no Postgres): 11 slides
+    pedidos juntos geram UM scrape. Propaga ScraperError."""
     key = car.external_id
     detail = _cached(key)
     if detail is not None:
         return detail
     with key_lock(_car_locks, _lock, key):
         detail = _cached(key)
-        if detail is None:
-            detail = _scrape(car)
-            with _lock:
-                _cache[key] = (time.monotonic(), detail)
+        if detail is not None:
+            return detail
+        own = conn is None
+        conn = conn or db.connect()
+        try:
+            # espera no máx. DETAIL_LOCK_WAIT; lock vazado → segue sem lock (no pior caso, 1 scrape a mais)
+            with db.advisory_lock(conn, f"union:detail:{key}", wait=DETAIL_LOCK_WAIT, required=False):
+                detail = _db_get(conn, key)
+                if detail is None:
+                    detail = _scrape(car)
+                    _db_put(conn, key, detail)
+        finally:
+            if own:
+                conn.close()
+        with _lock:
+            _cache[key] = (time.monotonic(), detail)
         return detail
 
 
-def clear_cache() -> None:
+def clear_cache(conn=None) -> None:
+    """Limpa a memória; com `conn`, também a tabela detail_cache."""
     with _lock:
         _cache.clear()
+    if conn is not None:
+        conn.execute("DELETE FROM detail_cache")
+        conn.commit()

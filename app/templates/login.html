@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block body_class %}page-login{% endblock %}
+{% block nav %}{% endblock %}
+
+{% block content %}
+<section class="login-wrap">
+  <div class="login-card card">
+    <div class="login-head">
+      <img class="login-logo" src="/static/logo-dark.png" alt="Union Veículos" width="260" height="63">
+      <p class="login-sub">Painel de Social Media</p>
+    </div>
+
+    <form class="login-form" method="post" action="/login" autocomplete="on">
+      {% if next is defined and next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      {# campo oculto de usuário: ajuda gerenciadores de senha a salvar a credencial #}
+      <input type="text" name="username" value="union" autocomplete="username" hidden aria-hidden="true" tabindex="-1">
+
+      <label class="login-label" for="password">Senha</label>
+      <div class="password-field {{ 'has-error' if error }}">
+        <input class="input" type="password" id="password" name="password" required autofocus
+               autocomplete="current-password" placeholder="Digite a senha do painel"
+               {% if error %}aria-invalid="true" aria-describedby="login-error"{% endif %}>
+        <button type="button" class="password-toggle" id="password-toggle" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+      </div>
+
+      {% if error %}
+      <p class="login-error" id="login-error" role="alert">⚠ {{ error }}</p>
+      {% endif %}
+
+      <button type="submit" class="btn btn-primary btn-block login-submit">Entrar</button>
+    </form>
+  </div>
+  <p class="muted small login-foot">Acesso restrito à equipe Union Veículos.</p>
+</section>
+
+<script>
+  (function () {
+    var input = document.getElementById('password');
+    var toggle = document.getElementById('password-toggle');
+    toggle.addEventListener('click', function () {
+      var show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      toggle.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+      toggle.title = toggle.getAttribute('aria-label');
+      toggle.classList.toggle('is-on', show);
+      input.focus();
+    });
+    {% if error %}input.select();{% endif %}
+  })();
+</script>
+{% endblock %}

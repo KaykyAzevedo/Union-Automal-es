@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/main.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{tests/**,docs/**,data/**,.venv/**,.github/**,run.bat,**/__pycache__/**}"
+    }
+  },
+  "crons": [
+    { "path": "/cron/price-check", "schedule": "0 21 * * *" }
+  ]
+}

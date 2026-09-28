@@ -1,15 +1,18 @@
 """Fontes do encarte — ÚNICO lugar para trocar tipografia.
 
 Ordem de busca por estilo:
-1. TT Lakes Neue em app/assets/fonts/ (primeiro arquivo que casar com os padrões
-   do estilo; se o estilo pede itálico e existir um arquivo itálico, não há
-   inclinação sintética);
-2. Bahnschrift variável do Windows (peso/largura via eixos);
+1. TT Lakes Neue em app/assets/fonts/ (arquivos com "Lakes" no nome; primeiro que
+   casar com os padrões do estilo; se o estilo pede itálico e existir um arquivo
+   itálico, não há inclinação sintética);
+2. Saira (OFL, empacotada em app/assets/fonts/saira/, licença em OFL.txt): fonte
+   variável com eixos de peso e largura + arquivo itálico próprio. É o padrão em
+   todos os ambientes, para a arte sair igual no PC e na Vercel;
 3. fonte padrão do Pillow (último recurso, só para não quebrar).
+
+Peso/largura da Saira calibrados para igualar as larguras da capa_exemplo.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -17,27 +20,27 @@ from pathlib import Path
 from PIL import ImageFont
 
 FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
-FALLBACK_FONT = Path(os.environ.get("UNION_FALLBACK_FONT", "C:/Windows/Fonts/bahnschrift.ttf"))
 LAKES_GLOB = "*Lakes*"
+DEFAULT_UPRIGHT = FONT_DIR / "saira" / "Saira[wdth,wght].ttf"
+DEFAULT_ITALIC = FONT_DIR / "saira" / "Saira-Italic[wdth,wght].ttf"
 
 
 @dataclass(frozen=True)
 class FontStyle:
-    lakes_patterns: tuple[str, ...]  # substrings (minúsculas) do nome do arquivo, em ordem de preferência
-    weight: int                      # eixo wght da Bahnschrift (300–700)
-    width: int = 100                 # eixo wdth da Bahnschrift (75–100)
-    italic: bool = False             # inclinar (sintético se a fonte não for itálica)
-    stretch: float = 1.0             # alargamento horizontal só no fallback (Lakes Neue já é larga)
+    lakes_patterns: tuple[str, ...]  # substrings (minúsculas) do nome do arquivo Lakes, em ordem de preferência
+    weight: int                      # eixo wght da Saira (100–900)
+    width: int = 100                 # eixo wdth da Saira (50–125)
+    italic: bool = False
+    stretch: float = 1.0             # alargamento horizontal extra (1.0 = nenhum)
 
 
 FONTS: dict[str, FontStyle] = {
-    # stretch calibrado para a Bahnschrift igualar as larguras da capa_exemplo
-    "brand":   FontStyle(("extrabold", "bold"), weight=700, stretch=1.17),
-    "model":   FontStyle(("bold",), weight=700, stretch=1.10),
-    "version": FontStyle(("light", "thin", "regular"), weight=300),
-    "value":   FontStyle(("regular", "medium"), weight=400, stretch=1.15),
+    "brand":   FontStyle(("extrabold", "bold"), weight=700, width=114),
+    "model":   FontStyle(("bold",), weight=700, width=105),
+    "version": FontStyle(("light", "thin", "regular"), weight=300, width=93),
+    "value":   FontStyle(("regular", "medium"), weight=500, width=95),
     "price":   FontStyle(("black italic", "extrabold italic", "bold italic", "black", "extrabold", "bold"),
-                         weight=700, italic=True, stretch=1.45),
+                         weight=800, width=118, italic=True),
 }
 
 
@@ -68,16 +71,16 @@ def get_font(style_name: str, size: int) -> tuple[ImageFont.FreeTypeFont, bool, 
     lakes = _pick_lakes(style)
     if lakes is not None:
         return ImageFont.truetype(str(lakes), size), style.italic and "italic" not in _norm(lakes), 1.0
-    if FALLBACK_FONT.exists():
-        font = ImageFont.truetype(str(FALLBACK_FONT), size)
-        try:
-            font.set_variation_by_axes([style.weight, style.width])
-        except OSError:  # fonte não variável
-            pass
-        return font, style.italic, style.stretch
+    path = DEFAULT_ITALIC if style.italic and DEFAULT_ITALIC.exists() else DEFAULT_UPRIGHT
+    if path.exists():
+        font = ImageFont.truetype(str(path), size)
+        font.set_variation_by_axes([style.weight, style.width])  # ordem dos eixos da Saira: wght, wdth
+        return font, style.italic and path != DEFAULT_ITALIC, style.stretch
     return ImageFont.load_default(size), style.italic, style.stretch
 
 
 def font_source() -> str:
     """Descrição da fonte em uso (para log/diagnóstico)."""
-    return "TT Lakes Neue" if _lakes_files() else (str(FALLBACK_FONT) if FALLBACK_FONT.exists() else "Pillow default")
+    if _lakes_files():
+        return "TT Lakes Neue"
+    return "Saira (OFL)" if DEFAULT_UPRIGHT.exists() else "Pillow default"

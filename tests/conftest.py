@@ -1,9 +1,14 @@
-"""Fixtures compartilhadas. Nada aqui acessa a rede nem o banco real (data/union.db)."""
+"""Fixtures compartilhadas. Nada aqui acessa a rede nem o banco real (data/union.db / Neon).
+
+Banco: SQLite temporário por teste (padrão). Com TEST_DATABASE_URL=postgresql://...@localhost:55432/...
+a suíte inteira roda no Postgres local (Docker), zerado antes de cada teste. Ver tests/run_both.ps1.
+"""
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -11,10 +16,19 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(ROOT))
 
-# Antes de importar app.*: sem scheduler, sem toast do Windows, sem mock embutido.
+# Antes de importar app.*: sem scheduler, sem toast do Windows, sem mock embutido,
+# e NUNCA herdar credenciais de nuvem do ambiente (Neon, WhatsApp, cron, Vercel).
 os.environ["UNION_DISABLE_SCHEDULER"] = "1"
 os.environ["UNION_DISABLE_NOTIFY"] = "1"
-os.environ.pop("UNION_MOCK_SCRAPER", None)
+for _var in ("UNION_MOCK_SCRAPER", "DATABASE_URL", "POSTGRES_URL", "DATABASE_URL_UNPOOLED",
+             "POSTGRES_URL_NON_POOLING", "VERCEL", "APP_PASSWORD", "SESSION_SECRET",
+             "CRON_SECRET", "WHATSAPP_PHONE", "CALLMEBOT_APIKEY", "APP_URL"):
+    os.environ.pop(_var, None)
+
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
+if TEST_DATABASE_URL and urlsplit(TEST_DATABASE_URL).hostname not in ("localhost", "127.0.0.1", "::1"):
+    raise SystemExit(f"TEST_DATABASE_URL precisa ser local (os testes apagam tudo): {TEST_DATABASE_URL}")
+PG = bool(TEST_DATABASE_URL)
 
 from app import db  # noqa: E402
 from app.scraper.parser import ScrapedCar  # noqa: E402
@@ -50,8 +64,32 @@ def tmp_db(tmp_path, monkeypatch) -> Path:
     from app.encarte import photos  # cache de fotos fora de data/ real
 
     monkeypatch.setattr(photos, "CACHE_DIR", tmp_path / "data" / "cache" / "photos")
-    db.init_db()
+    if PG:
+        monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+        db.init_db()
+        c = db.connect()
+        try:
+            db.truncate_all(c)
+            c.commit()
+        finally:
+            c.close()
+    else:
+        db.init_db()
+    try:
+        from app.encarte import source
+
+        source.clear_cache()
+    except ImportError:
+        pass
     return path
+
+
+def pytest_report_header(config):
+    return f"banco: {'Postgres ' + TEST_DATABASE_URL if PG else 'SQLite temporário'}"
+
+
+requires_pg = pytest.mark.skipif(not PG, reason="só com TEST_DATABASE_URL (Postgres)")
+sqlite_only = pytest.mark.skipif(PG, reason="só no SQLite")
 
 
 @pytest.fixture
