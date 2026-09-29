@@ -459,11 +459,11 @@ def _zip(resp):
     return zipfile.ZipFile(io.BytesIO(resp.content))
 
 
-def test_zip_default_11_png_and_caption(client, cars, scrape, photo_fetch):
-    r = client.get(f"/encarte/{cars['5509677']}.zip")   # Range Rover: 12 fotos → 11 slides
+def test_zip_default_all_photos_and_caption(client, cars, scrape, photo_fetch):
+    r = client.get(f"/encarte/{cars['5509677']}.zip")   # Range Rover: 12 fotos → 12 slides
     zf = _zip(r)
     names = zf.namelist()
-    assert names == [f"{i:02d}.png" for i in range(1, 12)] + ["legenda.txt"]
+    assert names == [f"{i:02d}.png" for i in range(1, 13)] + ["legenda.txt"]
     for n in names[:-1]:
         assert Image.open(io.BytesIO(zf.read(n))).size == (1080, 1350)
     assert zf.read("legenda.txt").decode("utf-8").strip()
@@ -485,3 +485,77 @@ def test_caption_route(client, cars, scrape):
     r = client.get(f"/encarte/{cars['5575766']}/caption.txt")
     assert r.status_code == 200 and r.text.strip()
     assert r.headers["content-type"].startswith("text/plain")
+
+
+# --- F10: sem limite de fotos (default = todas as fotos do anúncio) ------------------
+
+@pytest.fixture
+def many_photos(monkeypatch, scrape):
+    """Tracker com N fotos sintéticas (autocerto.com/fotos/339/5575766/<i>_000000.jpg)."""
+    import app.scraper.detail as detail_mod
+
+    state = {"n": 11}
+
+    def fake(url, client=None):
+        scrape["calls"] += 1
+        d = detail("5575766")
+        return replace(d, photos=[f"https://www.autocerto.com/fotos/339/5575766/{i}_000000.jpg"
+                                  for i in range(state["n"])])
+
+    monkeypatch.setattr(detail_mod, "scrape_detail", fake)
+    return state
+
+
+@pytest.mark.parametrize("n", [12, 25])
+def test_default_uses_all_photos(client, cars, many_photos, photo_fetch, n):
+    many_photos["n"] = n
+    cid = cars["5575766"]
+    zf = _zip(client.get(f"/encarte/{cid}.zip"))
+    assert zf.namelist() == [f"{i:02d}.png" for i in range(1, n + 1)] + ["legenda.txt"]
+    last = Image.open(io.BytesIO(zf.read(f"{n:02d}.png"))).convert("RGB")
+    assert _mid(last) == pytest.approx(color_for(f"https://www.autocerto.com/fotos/339/5575766/{n - 1}_000000.jpg"),
+                                       abs=3)
+    # slides: último existe, o seguinte é 404
+    _png(client.get(f"/encarte/{cid}/slide/{n - 1}.png"))
+    assert client.get(f"/encarte/{cid}/slide/{n}.png").status_code == 404
+
+
+def test_editor_ctx_lists_all_photos(client, cars, many_photos):
+    many_photos["n"] = 25
+    r = client.get(f"/editor/{cars['5575766']}")
+    assert r.status_code == 200
+    for i in (0, 11, 24):
+        assert f"/fotos/339/5575766/{i}_000000.jpg" in r.text
+
+
+def test_explicit_selection_beyond_11(client, cars, many_photos, photo_fetch):
+    many_photos["n"] = 25
+    order = ",".join(str(i) for i in reversed(range(25)))
+    zf = _zip(client.get(f"/encarte/{cars['5575766']}.zip?photos={order}"))
+    assert len(zf.namelist()) == 26  # 25 PNG + legenda
+    last = Image.open(io.BytesIO(zf.read("25.png"))).convert("RGB")
+    assert _mid(last) == pytest.approx(color_for("https://www.autocerto.com/fotos/339/5575766/0_000000.jpg"),
+                                       abs=3)  # ordem invertida: último slide = foto 0
+
+
+@pytest.mark.parametrize("q", ["?photos=25", "?photos=0,-1", "?photos=0,x"])
+def test_invalid_index_400_with_many_photos(client, cars, many_photos, photo_fetch, q):
+    many_photos["n"] = 25
+    assert client.get(f"/encarte/{cars['5575766']}.zip{q}").status_code == 400
+    assert client.get(f"/encarte/{cars['5575766']}/slide/0.png{q}").status_code == 400
+
+
+def test_duplicates_are_dropped(client, cars, many_photos, photo_fetch):
+    many_photos["n"] = 12
+    zf = _zip(client.get(f"/encarte/{cars['5575766']}.zip?photos=3,3,11,3"))
+    assert zf.namelist() == ["01.png", "02.png", "legenda.txt"]
+
+
+def test_safety_cap(client, cars, many_photos, photo_fetch):
+    from app.main import MAX_SLIDES
+
+    many_photos["n"] = MAX_SLIDES + 5
+    ids = ",".join(str(i) for i in range(MAX_SLIDES + 1))
+    assert client.get(f"/encarte/{cars['5575766']}/slide/0.png?photos={ids}").status_code == 400
+    assert client.get(f"/encarte/{cars['5575766']}/slide/{MAX_SLIDES - 1}.png").status_code == 200
+    assert client.get(f"/encarte/{cars['5575766']}/slide/{MAX_SLIDES}.png").status_code == 404

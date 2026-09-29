@@ -274,7 +274,9 @@ def to_png(img: Image.Image) -> bytes:
 
 
 _SLIDE_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
-_SLIDE_CACHE_MAX = 24  # ~1,6 MB por PNG
+# ~1,6 MB por PNG (~64 MB no total). Cabe um post inteiro de anúncio grande (todas as fotos;
+# hoje o maior tem 14) para prévia + ZIP não re-renderizarem.
+_SLIDE_CACHE_MAX = 40
 _slide_lock = threading.Lock()
 
 

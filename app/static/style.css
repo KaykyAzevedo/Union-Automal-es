@@ -462,6 +462,11 @@ details[open] > .picker-summary::after { content: "\25B4"; }
 .photo-tile.is-other img { opacity: .75; }
 .photo-tile.is-other:hover img { opacity: 1; }
 .tile-add { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); font-size: 18px; }
+.ig-warn {
+  margin-top: 8px; padding: 6px 10px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  background: var(--sold-soft); color: var(--accent); display: inline-block;
+}
+.ig-warn[hidden] { display: none; }
 .others { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
 .others > summary { cursor: pointer; font-weight: 700; }
 

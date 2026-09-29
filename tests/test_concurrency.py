@@ -115,17 +115,18 @@ def _parallel(client, paths, workers=24, timeout=60):
 
 
 def test_burst_of_slides_no_5xx_single_flight(client, car_id, scrape, cdn):
-    """Prévia fria: 11 slides x2 + zip + legenda + editor ao mesmo tempo."""
-    paths = [f"/encarte/{car_id}/slide/{n}.png" for n in range(11)] * 2
+    """Prévia fria: todos os slides (um por foto) x2 + zip + legenda + editor ao mesmo tempo."""
+    n_photos = len(DETAIL.photos)  # Range Rover: 12 (F10: sem teto de 11)
+    paths = [f"/encarte/{car_id}/slide/{n}.png" for n in range(n_photos)] * 2
     paths += [f"/encarte/{car_id}.zip", f"/encarte/{car_id}/caption.txt", f"/editor/{car_id}"]
     t0 = time.monotonic()
     responses = _parallel(client, paths)
     assert [r.status_code for r in responses] == [200] * len(paths), [r.text[:200] for r in responses if r.status_code != 200]
     assert scrape["calls"] == 1                       # single-flight do detalhe
     assert set(cdn.hits.values()) == {1}              # single-flight por foto (+ cache em disco)
-    assert len(cdn.hits) == 11
+    assert len(cdn.hits) == n_photos
     assert cdn.max_inflight <= encarte_photos.SITE_CONCURRENCY
-    for r in responses[:22]:
+    for r in responses[:2 * n_photos]:
         assert Image.open(io.BytesIO(r.content)).size == (1080, 1350)
     assert time.monotonic() - t0 < 30
 

@@ -150,8 +150,9 @@ def car_prices(car_id: int, conn=Depends(db.get_conn)):
 
 # ---- F4: editor de encarte ----------------------------------------------------
 
-DEFAULT_SLIDES = 11
-MAX_SLIDES = 20  # limite do carrossel do Instagram
+# Sem limite de fotos: por padrão o post usa TODAS as fotos do anúncio, na ordem do site
+# (1ª = capa). MAX_SLIDES é só um teto de segurança contra pedidos absurdos.
+MAX_SLIDES = 60
 
 
 def _car_or_404(conn, car_id: int):
@@ -172,11 +173,12 @@ def _detail_or_502(car, conn):
 
 
 def _chosen_urls(detail, photos: str | None) -> list[str]:
-    """`photos` = índices em detail.photos na ordem escolhida (default 0..10)."""
+    """`photos` = índices em detail.photos na ordem escolhida, sem repetição
+    (default: todas as fotos, na ordem do site)."""
     if not detail.photos:
         raise HTTPException(422, "Anúncio sem fotos")
     if photos is None or not photos.strip():
-        return detail.photos[:DEFAULT_SLIDES]
+        return detail.photos[:MAX_SLIDES]
     try:
         idx = [int(p) for p in photos.split(",") if p.strip()]
     except ValueError as exc:

@@ -116,8 +116,8 @@ def _db_put(conn, key: str, detail) -> None:
 def get_detail(car: Car, conn=None):
     """CarDetail do carro. Camadas: memória → tabela detail_cache (TTL_SECONDS,
     compartilhada entre instâncias da Vercel) → scrape. Single-flight por carro no
-    processo (lock) e entre instâncias (pg_advisory_lock no Postgres): 11 slides
-    pedidos juntos geram UM scrape. Propaga ScraperError."""
+    processo (lock) e entre instâncias (pg_advisory_lock no Postgres): todos os
+    slides pedidos juntos geram UM scrape. Propaga ScraperError."""
     key = car.external_id
     detail = _cached(key)
     if detail is not None:

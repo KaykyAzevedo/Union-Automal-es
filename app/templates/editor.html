@@ -9,7 +9,7 @@
 <section class="page-head">
   <div>
     <h1>Editor de encarte</h1>
-    <p class="muted">Escolha um carro, ajuste as fotos e baixe o post pronto (11 imagens 1080×1350 + legenda).</p>
+    <p class="muted">Escolha um carro, ajuste as fotos e baixe o post pronto (todas as fotos do anúncio em 1080×1350 + legenda).</p>
   </div>
 </section>
 
@@ -83,10 +83,11 @@
       {# fotos escolhidas / disponíveis #}
       <div class="card panel">
         <div class="panel-head">
-          <h2 class="section-title">Fotos do post <span class="pill" id="chosen-count">0/11</span></h2>
+          <h2 class="section-title">Fotos do post <span class="pill" id="chosen-count">0 fotos</span></h2>
           <button type="button" class="btn btn-ghost btn-sm" id="reset-photos">↺ Ordem do site</button>
         </div>
-        <p class="muted small">A 1ª foto vira a <b>capa</b>. Arraste para reordenar ou use as setas. Máximo de 11 fotos.</p>
+        <p class="muted small">A 1ª foto vira a <b>capa</b>. Arraste para reordenar, use as setas ou remova as que não quiser.</p>
+        <p class="ig-warn" id="ig-warn" hidden>ⓘ O Instagram aceita até 20 imagens por post.</p>
         <ol class="photo-strip" id="chosen"></ol>
 
         <details class="others" id="others-wrap">
@@ -174,11 +175,12 @@
   if (!cfg) return;
 
   // ----- estado das fotos -----
-  var MAX = 11;
+  var IG_LIMIT = 20;     // limite do Instagram por post: só avisa, não bloqueia
+  var SERVER_MAX = 60;   // teto de segurança do backend (MAX_SLIDES): acima disso a rota devolve 400
   var urlOf = {};
   cfg.photos.forEach(function (p) { urlOf[p.index] = p.url; });
   var siteOrder = cfg.photos.map(function (p) { return p.index; });
-  var chosen = siteOrder.slice(0, MAX);
+  var chosen = siteOrder.slice(0, SERVER_MAX);  // padrão: todas as fotos, na ordem do site
 
   var chosenEl = document.getElementById('chosen');
   var othersEl = document.getElementById('others');
@@ -250,32 +252,34 @@
 
     othersEl.innerHTML = '';
     var others = siteOrder.filter(function (i) { return chosen.indexOf(i) === -1; });
-    var full = chosen.length >= MAX;
     others.forEach(function (idx) {
       var li = tile(idx, -1);
       li.classList.add('is-other');
-      var add = btn('+', full ? 'Post cheio (máx. 11) — remova uma foto antes' : 'Incluir no post', function () {
-        if (chosen.length >= MAX) return;
+      var atMax = chosen.length >= SERVER_MAX;
+      var add = btn('+', atMax ? 'Limite de ' + SERVER_MAX + ' fotos por encarte' : 'Incluir no post', function () {
+        if (chosen.length >= SERVER_MAX) return;
         chosen.push(idx); update();
-      }, full);
+      }, atMax);
       add.classList.add('tile-add');
       li.appendChild(add);
-      if (!full) li.addEventListener('click', function (e) { if (e.target === li || e.target.tagName === 'IMG') add.click(); });
+      li.addEventListener('click', function (e) { if (e.target === li || e.target.tagName === 'IMG') add.click(); });
       othersEl.appendChild(li);
     });
-    document.getElementById('chosen-count').textContent = chosen.length + '/' + MAX;
+    document.getElementById('chosen-count').textContent = chosen.length + (chosen.length === 1 ? ' foto' : ' fotos');
+    document.getElementById('ig-warn').hidden = chosen.length <= IG_LIMIT;
     document.getElementById('others-count').textContent = others.length;
     document.getElementById('others-wrap').hidden = others.length === 0;
   }
 
-  // ----- prévia: fila com no máx. 3 imagens em paralelo (capa primeiro) e retry -----
+  // ----- prévia: fila com no máx. 4 imagens em paralelo (capa primeiro) e retry -----
+  // Sem teto de fotos: um post pode ter 20+ slides, então a fila evita disparar tudo de uma vez.
   var timer = null;
-  var CONCURRENCY = 3, RETRY_DELAYS = [1000, 3000];
+  var CONCURRENCY = 4, RETRY_DELAYS = [1000, 3000];
   var gen = 0, queue = [], active = 0, pending = 0, failed = 0;
 
   function setStatus() {
     var parts = [];
-    if (pending > 0) parts.push('gerando ' + pending + ' de ' + chosen.length + '…');
+    if (pending > 0) parts.push('Gerando ' + (chosen.length - pending) + '/' + chosen.length + '…');
     if (failed > 0) parts.push(failed + ' com falha');
     status.textContent = parts.length ? parts.join(' · ') : chosen.length + ' imagens';
   }
@@ -312,13 +316,14 @@
       fetchPng(fresh ? bust(slide.src, n) : slide.src, fresh).then(function (blob) {
         if (myGen !== gen) return release();
         slide.blob = blob;
+        slide._res(blob);
         slide.objUrl = URL.createObjectURL(blob);
         slide.img.src = slide.objUrl;
         slide.dl.href = slide.objUrl;
         slide.fig.classList.remove('is-loading', 'is-retrying');
         slide.note.textContent = '';
         pending = Math.max(0, pending - 1); setStatus(); release();
-      }).catch(function () {
+      }).catch(function (err) {
         if (myGen !== gen) return release();
         if (n < RETRY_DELAYS.length) {
           slide.fig.classList.add('is-retrying');
@@ -332,9 +337,16 @@
         }
         slide.fig.classList.remove('is-loading', 'is-retrying');
         slide.fig.classList.add('is-error');
+        slide._rej(err);
         pending = Math.max(0, pending - 1); failed++; setStatus(); release();
       });
     } };
+  }
+
+  // slide.ready resolve com o Blob quando a prévia termina, ou rejeita na falha final/descartado.
+  function armReady(slide) {
+    slide.ready = new Promise(function (res, rej) { slide._res = res; slide._rej = rej; });
+    slide.ready.catch(function () {});  // quem não esperar não gera "unhandled rejection"
   }
 
   function enqueue(slide) {
@@ -347,7 +359,10 @@
   function renderSlides() {
     gen++;
     queue = []; active = 0; failed = 0; pending = chosen.length;
-    slides.forEach(function (sl) { if (sl.objUrl) URL.revokeObjectURL(sl.objUrl); });
+    slides.forEach(function (sl) {
+      if (sl.objUrl) URL.revokeObjectURL(sl.objUrl);
+      if (!sl.blob && sl._rej) sl._rej(new Error('prévia descartada'));
+    });
     slides = [];
     var q = qs();
     slidesEl.innerHTML = '';
@@ -366,11 +381,13 @@
       retry.textContent = '↻ Tentar de novo';
       var slide = { n: n, fig: fig, img: img, note: note, src: src, blob: null, objUrl: null, dl: null };
       slides.push(slide);
+      armReady(slide);
       retry.addEventListener('click', function () {
         fig.classList.remove('is-error'); fig.classList.add('is-loading');
         note.textContent = '';
         failed = Math.max(0, failed - 1); pending++; setStatus();
         slide.manual = true;  // clique manual: recomeça com 2 retries e cache-buster
+        armReady(slide);
         enqueue(slide);
       });
       var fail = document.createElement('div');
@@ -405,7 +422,7 @@
 
   var resetBtn = document.getElementById('reset-photos');
   if (resetBtn) resetBtn.addEventListener('click', function () {
-    chosen = siteOrder.slice(0, MAX); update();
+    chosen = siteOrder.slice(0, SERVER_MAX); update();
   });
 
   // ----- legenda -----
@@ -499,14 +516,13 @@
     function worker() {
       if (next >= total) return Promise.resolve();
       var sl = snapshot[next++];
-      var p = sl.blob ? Promise.resolve(sl.blob) : fetchPngRetry(sl.src).then(function (blob) {
-        if (!sl.blob) sl.blob = blob;       // aproveita na prévia se ela ainda não tinha carregado
-        return blob;
+      var p = sl.blob ? Promise.resolve(sl.blob) : sl.ready.catch(function () {
+        return fetchPngRetry(sl.src);       // a prévia falhou ou foi descartada: tenta por conta própria
       });
       return p.then(function (blob) {
         files[sl.n] = blob;
         got++;
-        zipState('Baixando imagens: ' + got + ' de ' + total + '…');
+        zipState('Gerando ' + got + '/' + total + '…');
         return worker();
       }, function (err) {
         err.slide = sl.n;
@@ -521,7 +537,7 @@
 
     Promise.all([loadJSZip(), caption]).then(function (res) {
       var JSZip = res[0], text = res[1];
-      zipState('Baixando imagens: 0 de ' + total + '…');
+      zipState('Gerando 0/' + total + '…');
       var workers = [];
       for (var i = 0; i < Math.min(CONCURRENCY, total); i++) workers.push(worker());
       return Promise.all(workers).then(function () {

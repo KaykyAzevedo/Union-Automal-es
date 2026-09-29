@@ -1,6 +1,6 @@
 """Download de fotos com cache em disco (data/cache/photos/).
 
-Robustez para o editor, que pede ~11 slides em paralelo:
+Robustez para o editor, que pede um slide por foto do anúncio (todas) em paralelo:
 - single-flight por URL: só uma thread baixa cada foto, as outras esperam o cache;
 - no máximo SITE_CONCURRENCY requisições simultâneas ao site/CDN (compartilhado
   com o scrape de detalhe em source.py);
