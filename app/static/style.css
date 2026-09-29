@@ -648,6 +648,79 @@ details[open] > .picker-summary::after { content: "\25B4"; }
   .team-list { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ---------- editor: ações do post + celular (F11) ---------- */
+.post-actions { padding: 14px 18px; box-shadow: none; display: flex; flex-direction: column; gap: 8px; }
+.post-actions-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.post-actions .zip-status { max-width: none; margin: 0; text-align: right; }
+.post-actions .zip-status:empty { display: none; }
+.btn-lg { min-height: 52px; font-size: 16px; padding: 0 20px; }
+#share-btn.is-ready { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(181, 18, 27, .55); }
+  50% { box-shadow: 0 0 0 8px rgba(181, 18, 27, 0); }
+}
+.hint-touch { display: none; }
+.is-touch .hint-fine { display: none; }
+.is-touch .hint-touch { display: inline; }
+.is-touch .photo-tile { cursor: default; }
+
+@media (max-width: 600px) {
+  /* nada de rolagem horizontal da página */
+  html, body { overflow-x: hidden; }
+  .input, .caption, textarea, select { font-size: 16px; }   /* evita o zoom automático do iOS */
+  .btn, .btn-sm, .chip { min-height: 44px; }
+  .page-head h1 { font-size: 22px; }
+  .editor { gap: 14px; }
+  .workspace { gap: 14px; }
+  .panel { padding: 14px; }
+
+  /* seletor de carro */
+  .picker-summary { min-height: 52px; padding: 12px 14px; }
+  .picker-search .input { min-height: 46px; }
+  .picker-item { padding: 10px 8px; min-height: 60px; }
+  .picker-list { max-height: 60vh; -webkit-overflow-scrolling: touch; }
+
+  /* resumo do carro */
+  .car-summary { padding: 12px; gap: 10px; }
+  .summary-img { height: 170px; }
+  .summary-model { font-size: 20px; }
+  .summary-link { width: 100%; }
+
+  /* fotos: 2 por linha, setas grandes para o toque */
+  .photo-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .photo-tile { aspect-ratio: 4 / 3.4; }
+  .tile-bar { padding: 5px; gap: 4px; }
+  .tile-btn { width: 44px; height: 44px; font-size: 17px; border-radius: 10px; background: rgba(5, 10, 20, .55); }
+  .tile-add { width: 44px; height: 44px; font-size: 22px; }
+  .tile-label { font-size: 13px; padding: 2px 9px; }
+  .others > summary { min-height: 44px; display: flex; align-items: center; gap: 8px; }
+
+  /* prévia: faixa com rolagem horizontal só dentro do card */
+  .slides {
+    display: flex; overflow-x: auto; gap: 10px; margin: 10px -14px 0; padding: 0 14px 6px;
+    scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+  }
+  .slide { flex: 0 0 72%; scroll-snap-align: center; }
+  .slide figcaption .btn { min-height: 40px; }
+
+  /* ações: grudadas no rodapé da tela, com área segura do iPhone */
+  .post-actions {
+    position: sticky; bottom: 0; z-index: 5; margin: 0 -16px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    border-radius: 14px 14px 0 0; border-bottom: 0;
+    background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(8px);
+    box-shadow: 0 -6px 20px rgba(5, 10, 20, .18);
+  }
+  .post-actions-row { flex-wrap: nowrap; }
+  .post-actions #share-btn { flex: 1; }
+  .post-actions #zip-btn { flex: none; }
+  .post-actions .zip-status { text-align: center; font-size: 13px; }
+
+  /* legenda */
+  .caption { min-height: 320px; }
+  .panel-head .actions { width: 100%; }
+  .panel-head .actions .btn { flex: 1; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 800px) {
   .stats { grid-template-columns: repeat(2, 1fr); }

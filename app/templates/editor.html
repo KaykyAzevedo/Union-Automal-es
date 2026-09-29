@@ -86,13 +86,13 @@
           <h2 class="section-title">Fotos do post <span class="pill" id="chosen-count">0 fotos</span></h2>
           <button type="button" class="btn btn-ghost btn-sm" id="reset-photos">↺ Ordem do site</button>
         </div>
-        <p class="muted small">A 1ª foto vira a <b>capa</b>. Arraste para reordenar, use as setas ou remova as que não quiser.</p>
+        <p class="muted small">A 1ª foto vira a <b>capa</b>. <span class="hint-fine">Arraste para reordenar, use as setas ou remova as que não quiser.</span><span class="hint-touch">Use as setas ◀ ▶ para reordenar e ✕ para remover.</span></p>
         <p class="ig-warn" id="ig-warn" hidden>ⓘ O Instagram aceita até 20 imagens por post.</p>
         <ol class="photo-strip" id="chosen"></ol>
 
         <details class="others" id="others-wrap">
           <summary><span>Outras fotos do anúncio</span> <span class="pill" id="others-count">0</span></summary>
-          <p class="muted small">Clique em uma foto para incluí-la no post.</p>
+          <p class="muted small">Toque em uma foto para incluí-la no post.</p>
           <ul class="photo-strip photo-strip-others" id="others"></ul>
         </details>
       </div>
@@ -101,12 +101,17 @@
       <div class="card panel">
         <div class="panel-head">
           <h2 class="section-title">Prévia <span class="muted small" id="preview-status"></span></h2>
-          <div class="zip-box">
-            <span class="zip-status" id="zip-status" role="status" aria-live="polite"></span>
-            <button type="button" class="btn btn-primary" id="zip-btn">⬇ Baixar ZIP</button>
-          </div>
         </div>
         <div class="slides" id="slides"></div>
+      </div>
+
+      {# ações do post: no celular fica grudada no rodapé da tela #}
+      <div class="card post-actions" id="post-actions">
+        <div class="post-actions-row">
+          <button type="button" class="btn btn-primary btn-lg" id="share-btn" hidden>📲 Salvar / Compartilhar fotos</button>
+          <button type="button" class="btn btn-primary" id="zip-btn">⬇ Baixar ZIP</button>
+        </div>
+        <p class="zip-status" id="zip-status" role="status" aria-live="polite"></p>
       </div>
 
       {% endif %}
@@ -174,6 +179,16 @@
   var cfg = window.ENCARTE;
   if (!cfg) return;
 
+  // Celular/tablet: tela estreita ou toque. Muda o botão principal e desliga o drag (HTML5 drag não funciona no toque).
+  var IS_TOUCH = window.matchMedia('(max-width: 600px), (pointer: coarse)').matches;
+  var FINE_POINTER = window.matchMedia('(pointer: fine)').matches;
+  var CAN_SHARE_FILES = false;
+  try {
+    CAN_SHARE_FILES = !!(navigator.share && navigator.canShare &&
+      navigator.canShare({ files: [new File([new Blob(['x'], { type: 'image/png' })], 't.png', { type: 'image/png' })] }));
+  } catch (e) { CAN_SHARE_FILES = false; }
+  document.documentElement.classList.toggle('is-touch', IS_TOUCH);
+
   // ----- estado das fotos -----
   var IG_LIMIT = 20;     // limite do Instagram por post: só avisa, não bloqueia
   var SERVER_MAX = 60;   // teto de segurança do backend (MAX_SLIDES): acima disso a rota devolve 400
@@ -220,7 +235,7 @@
     chosenEl.innerHTML = '';
     chosen.forEach(function (idx, pos) {
       var li = tile(idx, pos);
-      li.draggable = true;
+      li.draggable = FINE_POINTER && !IS_TOUCH;
       li.dataset.pos = pos;
       var label = document.createElement('span');
       label.className = 'tile-label';
@@ -276,6 +291,8 @@
   var timer = null;
   var CONCURRENCY = 4, RETRY_DELAYS = [1000, 3000];
   var gen = 0, queue = [], active = 0, pending = 0, failed = 0;
+  // cancela os downloads da prévia antiga quando as fotos mudam (não acumula requisições na Vercel)
+  var genAbort = window.AbortController ? new AbortController() : null;
 
   function setStatus() {
     var parts = [];
@@ -296,8 +313,10 @@
   function bust(url, n) { return url + '&_r=' + n + '-' + Date.now(); }
 
   // Busca um slide como Blob PNG. Erro HTTP ou resposta que não é imagem viram exceção.
-  function fetchPng(url, fresh) {
-    return fetch(url, { cache: fresh ? 'no-store' : 'default', credentials: 'same-origin' }).then(function (r) {
+  function fetchPng(url, fresh, signal) {
+    var opts = { cache: fresh ? 'no-store' : 'default', credentials: 'same-origin' };
+    if (signal) opts.signal = signal;
+    return fetch(url, opts).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       var type = r.headers.get('content-type') || '';
       if (type.indexOf('image/') !== 0) throw new Error('resposta inesperada (' + (type || 'sem tipo') + ')');
@@ -308,12 +327,12 @@
   // Cada job ocupa um slot só enquanto a requisição está em andamento; na espera
   // do retry o slot fica livre e o job volta para o início da fila.
   function makeJob(slide, tryN) {
-    var myGen = gen, n = tryN || 0;
+    var myGen = gen, n = tryN || 0, signal = genAbort && genAbort.signal;
     return { gen: myGen, run: function () {
       function release() { if (myGen === gen) active = Math.max(0, active - 1); pump(); }
       var fresh = n > 0 || slide.manual;
       // cache-buster só nas novas tentativas, para não reaproveitar a resposta com erro
-      fetchPng(fresh ? bust(slide.src, n) : slide.src, fresh).then(function (blob) {
+      fetchPng(fresh ? bust(slide.src, n) : slide.src, fresh, signal).then(function (blob) {
         if (myGen !== gen) return release();
         slide.blob = blob;
         slide._res(blob);
@@ -358,6 +377,8 @@
 
   function renderSlides() {
     gen++;
+    resetShare();
+    if (genAbort) { genAbort.abort(); genAbort = new AbortController(); }
     queue = []; active = 0; failed = 0; pending = chosen.length;
     slides.forEach(function (sl) {
       if (sl.objUrl) URL.revokeObjectURL(sl.objUrl);
@@ -437,18 +458,39 @@
   }
   captionEl.addEventListener('input', updateCount);
   updateCount();
+  // Cópia que funciona no iOS: Clipboard API (HTTPS) e, se falhar, textarea temporária somente leitura
+  // com setSelectionRange (no iOS, select() sozinho não seleciona e o foco abriria o teclado).
+  function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;';
+    document.body.appendChild(ta);
+    var ok = false;
+    try {
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      ok = document.execCommand('copy');
+    } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  // Chamar DENTRO do gesto do usuário (toque/clique). Resolve true/false.
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; },
+        function () { return legacyCopy(text); });
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
   var copyBtn = document.getElementById('copy-caption');
   copyBtn.addEventListener('click', function () {
-    var ta = document.getElementById('caption');
-    function ok() {
-      copyBtn.textContent = '✓ Copiado';
-      setTimeout(function () { copyBtn.textContent = '⧉ Copiar'; }, 1800);
-    }
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(ta.value).then(ok, function () { ta.select(); document.execCommand('copy'); ok(); });
-    } else {
-      ta.select(); document.execCommand('copy'); ok();
-    }
+    copyText(captionEl.value).then(function (ok) {
+      copyBtn.textContent = ok ? '✓ Copiado' : '⚠ Selecione e copie';
+      if (!ok) { captionEl.focus(); captionEl.setSelectionRange(0, captionEl.value.length); }
+      setTimeout(function () { copyBtn.textContent = '⧉ Copiar'; }, 2200);
+    });
   });
 
   // ----- ZIP montado no navegador (na Vercel a resposta da função é limitada a 4,5 MB) -----
@@ -496,40 +538,48 @@
   }
 
   var zipBtn = document.getElementById('zip-btn');
+  var shareBtn = document.getElementById('share-btn');
   var zipStatus = document.getElementById('zip-status');
-  var zipBusy = false;
+  var busy = false;
   function zipState(text, kind) {
     zipStatus.textContent = text;
     zipStatus.className = 'zip-status' + (kind ? ' is-' + kind : '');
   }
+  function baseName() { return slugify(cfg.zipParts || []) || ('encarte-' + cfg.carId); }
+  function failMsg(err, what) {
+    return err && err.slide !== undefined
+      ? 'Falha ao baixar a imagem ' + pad(err.slide) + ' (' + err.message + '). Tente de novo.'
+      : 'Não foi possível ' + what + ': ' + (err && err.message ? err.message : 'erro desconhecido') + '.';
+  }
 
-  if (zipBtn) zipBtn.addEventListener('click', function () {
-    if (zipBusy) return;
-    zipBusy = true;
-    zipBtn.disabled = true;
-    var snapshot = slides.slice();          // ordem atual, mesmo que o usuário mexa durante o download
-    var total = snapshot.length, got = 0, next = 0;
-    var files = new Array(total);
-    var baseName = slugify(cfg.zipParts || []) || ('encarte-' + cfg.carId);
-    zipState('Preparando…');
-
+  // Blobs de todos os slides da geração atual, na ordem. Reaproveita a prévia (blob pronto ou em
+  // andamento via slide.ready) e só baixa por conta própria o que falhou — no máximo CONCURRENCY por vez.
+  function collectBlobs(snapshot, onProgress) {
+    var total = snapshot.length, got = 0, next = 0, out = new Array(total);
     function worker() {
       if (next >= total) return Promise.resolve();
       var sl = snapshot[next++];
-      var p = sl.blob ? Promise.resolve(sl.blob) : sl.ready.catch(function () {
-        return fetchPngRetry(sl.src);       // a prévia falhou ou foi descartada: tenta por conta própria
-      });
+      var p = sl.blob ? Promise.resolve(sl.blob) : sl.ready.catch(function () { return fetchPngRetry(sl.src); });
       return p.then(function (blob) {
-        files[sl.n] = blob;
-        got++;
-        zipState('Gerando ' + got + '/' + total + '…');
+        out[sl.n] = blob; got++;
+        onProgress(got, total);
         return worker();
-      }, function (err) {
-        err.slide = sl.n;
-        throw err;
-      });
+      }, function (err) { err.slide = sl.n; throw err; });
     }
+    onProgress(0, total);
+    var workers = [];
+    for (var i = 0; i < Math.min(CONCURRENCY, total); i++) workers.push(worker());
+    return Promise.all(workers).then(function () { return out; });
+  }
+  function allReady() { return slides.length > 0 && slides.every(function (sl) { return !!sl.blob; }); }
 
+  // ----- ZIP (principal no desktop, secundário no celular) -----
+  if (zipBtn) zipBtn.addEventListener('click', function () {
+    if (busy) return;
+    busy = true; setButtons(true);
+    var snapshot = slides.slice();          // ordem atual, mesmo que o usuário mexa durante o download
+    var name = baseName();
+    zipState('Preparando…');
     var caption = captionEl.value.trim()
       ? Promise.resolve(captionEl.value)
       : fetch('/encarte/' + cfg.carId + '/caption.txt', { credentials: 'same-origin' })
@@ -537,29 +587,131 @@
 
     Promise.all([loadJSZip(), caption]).then(function (res) {
       var JSZip = res[0], text = res[1];
-      zipState('Gerando 0/' + total + '…');
-      var workers = [];
-      for (var i = 0; i < Math.min(CONCURRENCY, total); i++) workers.push(worker());
-      return Promise.all(workers).then(function () {
-        zipState('Compactando…');
-        var zip = new JSZip();
-        files.forEach(function (blob, i) { zip.file(pad(i) + '.png', blob); });
-        if (text) zip.file('legenda.txt', text.replace(/\r?\n/g, '\r\n'));
-        // PNG já é comprimido: STORE deixa a montagem instantânea
-        return zip.generateAsync({ type: 'blob', compression: 'STORE' });
-      });
+      return collectBlobs(snapshot, function (got, total) { zipState('Gerando ' + got + '/' + total + '…'); })
+        .then(function (files) {
+          zipState('Compactando…');
+          var zip = new JSZip();
+          files.forEach(function (blob, i) { zip.file(pad(i) + '.png', blob); });
+          if (text) zip.file('legenda.txt', text.replace(/\r?\n/g, '\r\n'));
+          // PNG já é comprimido: STORE deixa a montagem instantânea
+          return zip.generateAsync({ type: 'blob', compression: 'STORE' });
+        });
     }).then(function (blob) {
-      saveBlob(blob, baseName + '.zip');
-      zipState('✓ ' + baseName + '.zip pronto (' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB)', 'ok');
+      saveBlob(blob, name + '.zip');
+      zipState('✓ ' + name + '.zip pronto (' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB)', 'ok');
     }).catch(function (err) {
-      var msg = err && err.slide !== undefined
-        ? 'Falha ao baixar a imagem ' + pad(err.slide) + ' (' + err.message + '). Tente de novo.'
-        : 'Não foi possível montar o ZIP: ' + (err && err.message ? err.message : 'erro desconhecido') + '.';
-      zipState(msg, 'error');
-    }).then(function () {
-      zipBusy = false;
-      zipBtn.disabled = false;
+      zipState(failMsg(err, 'montar o ZIP'), 'error');
+    }).then(function () { busy = false; setButtons(false); });
+  });
+
+  // ----- Salvar / Compartilhar (principal no celular) -----
+  // navigator.share precisa de um gesto do usuário ativo. Se as imagens ainda não estão prontas,
+  // o 1º toque só prepara ("Preparando 5/12…") e o botão vira "Compartilhar agora" para o toque final.
+  var SHARE_LABEL = CAN_SHARE_FILES ? '📲 Salvar / Compartilhar fotos' : '⬇ Baixar fotos';
+  var prepared = null;   // { gen, files: File[] } pronto para o toque final
+
+  function setButtons(disabled) {
+    if (zipBtn) zipBtn.disabled = disabled;
+    if (shareBtn) shareBtn.disabled = disabled;
+  }
+  function resetShare() {
+    prepared = null;
+    if (shareBtn) { shareBtn.textContent = SHARE_LABEL; shareBtn.classList.remove('is-ready'); }
+  }
+  function toFiles(blobs) {
+    return blobs.map(function (blob, i) { return new File([blob], pad(i) + '.png', { type: 'image/png' }); });
+  }
+
+  // Plano B: baixa uma a uma (com intervalo, para o navegador não bloquear downloads múltiplos).
+  function downloadOneByOne(files, why) {
+    var i = 0;
+    busy = true; setButtons(true);
+    (function nextFile() {
+      if (i >= files.length) {
+        zipState((why ? why + ' ' : '') + '✓ ' + files.length + ' imagens baixadas. Se preferir, use o ZIP.', 'ok');
+        busy = false; setButtons(false);
+        return;
+      }
+      zipState((why ? why + ' ' : '') + 'Baixando ' + (i + 1) + '/' + files.length + '…');
+      saveBlob(files[i], files[i].name);
+      i++;
+      setTimeout(nextFile, 450);
+    })();
+  }
+
+  // Chamado de forma síncrona dentro do toque: copia a legenda e abre o compartilhamento no mesmo gesto.
+  function shareNow(files) {
+    var copied = copyText(captionEl.value);
+    var captionNote = function () {
+      return copied.then(function (ok) { return ok ? 'Legenda copiada.' : 'Não consegui copiar a legenda — use o botão Copiar.'; });
+    };
+    if (!CAN_SHARE_FILES) {
+      captionNote().then(function (note) { downloadOneByOne(files, note); });
+      return;
+    }
+    var data = { files: files, title: baseName() };
+    var accepted = false;
+    try { accepted = navigator.canShare(data); } catch (e) { accepted = false; }
+    if (!accepted) {
+      captionNote().then(function (note) {
+        downloadOneByOne(files, note + ' O celular não aceitou ' + files.length + ' imagens de uma vez;');
+      });
+      return;
+    }
+    zipState('Legenda copiada. Escolha "Salvar imagens" ou o Instagram…');
+    var shared;
+    try { shared = navigator.share(data); } catch (e) { shared = Promise.reject(e); }
+    Promise.resolve(shared).then(function () {
+      return captionNote().then(function (note) {
+        zipState('✓ ' + files.length + ' imagens enviadas. ' + note + ' No Instagram, cole a legenda no post.', 'ok');
+      });
+    }, function (err) {
+      return captionNote().then(function (note) {
+        if (err && err.name === 'AbortError') {
+          // o usuário fechou a janela de compartilhar: não é erro
+          zipState('Compartilhamento cancelado. ' + note + ' Toque de novo quando quiser.');
+          return;
+        }
+        downloadOneByOne(files, note + ' Não deu para compartilhar (' + (err && err.name || 'erro') + ');');
+      });
     });
+  }
+
+  if (shareBtn && IS_TOUCH) {
+    shareBtn.hidden = false;
+    shareBtn.textContent = SHARE_LABEL;
+    // no celular o ZIP vira opção secundária
+    zipBtn.classList.remove('btn-primary');
+    zipBtn.classList.add('btn-ghost');
+    zipBtn.textContent = '⬇ ZIP';
+    zipBtn.title = 'Baixar todas as imagens + legenda em um arquivo ZIP';
+  }
+
+  if (shareBtn) shareBtn.addEventListener('click', function () {
+    if (busy) return;
+    // 1) já preparado para esta geração → compartilha no mesmo toque
+    if (prepared && prepared.gen === gen) {
+      shareNow(prepared.files);
+      return;
+    }
+    // 2) prévia já terminou → dá para montar os arquivos agora, sem perder o gesto
+    if (allReady()) {
+      shareNow(toFiles(slides.map(function (sl) { return sl.blob; })));
+      return;
+    }
+    // 3) ainda gerando → prepara e pede o toque final
+    busy = true; setButtons(true);
+    var myGen = gen, snapshot = slides.slice();
+    collectBlobs(snapshot, function (got, total) { zipState('Preparando ' + got + '/' + total + '…'); })
+      .then(function (blobs) {
+        if (myGen !== gen) { zipState('As fotos mudaram. Toque de novo para preparar.'); return; }
+        prepared = { gen: myGen, files: toFiles(blobs) };
+        shareBtn.textContent = CAN_SHARE_FILES ? '📲 Compartilhar agora' : '⬇ Baixar agora';
+        shareBtn.classList.add('is-ready');
+        zipState('✓ ' + blobs.length + ' imagens prontas. Toque em "' + shareBtn.textContent.replace(/^\S+\s/, '') + '".', 'ok');
+      }, function (err) {
+        zipState(failMsg(err, 'preparar as imagens'), 'error');
+      }).then(function () { busy = false; setButtons(false); });
   });
 
   // Sem fotos: não há prévia nem ZIP (as rotas devolvem 422).
