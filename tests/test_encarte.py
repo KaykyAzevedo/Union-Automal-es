@@ -169,6 +169,75 @@ def test_cover_with_missing_fields():
     assert render.render_cover(d, _photo()).size == (1080, 1350)
 
 
+# --- selos da capa (blindado / 0 km) ---------------------------------------------
+
+ALL_BADGE_BOXES = [render.BADGE_ARMORED, render.BADGE_ZERO_KM, render.BADGE_PAIR_ARMORED, render.BADGE_PAIR_ZERO_KM]
+
+
+def _plain():
+    return replace(detail("5575766"), armored=False, km=5500)
+
+
+def _union(boxes):
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+@pytest.mark.parametrize("armored,km,boxes", [
+    (False, 5500, []),
+    (True, 5500, [render.BADGE_ARMORED]),
+    (False, 0, [render.BADGE_ZERO_KM]),
+    (True, 0, [render.BADGE_PAIR_ARMORED, render.BADGE_PAIR_ZERO_KM]),
+])
+def test_cover_badges_combinations(monkeypatch, armored, km, boxes):
+    d = replace(_plain(), armored=armored, km=km)
+    img = render.render_cover(d, _photo())
+    base = render.render_cover(_plain(), _photo())
+    # fundo de comparação: mesmos dados (o km aparece no rodapé), sem selos
+    with monkeypatch.context() as m:
+        m.setattr(render, "cover_badges", lambda _d: [])
+        ref = render.render_cover(d, _photo())
+    diff = ImageChops.difference(img, ref).getbbox()
+    if not boxes:
+        assert diff is None
+        assert ImageChops.difference(ref.crop((0, 0, 1080, 800)), base.crop((0, 0, 1080, 800))).getbbox() is None
+        return
+    u = _union(boxes)
+    assert diff is not None and u[0] <= diff[0] and u[1] <= diff[1] and diff[2] <= u[2] and diff[3] <= u[3]
+    for box in boxes:
+        assert ImageChops.difference(img.crop(box), ref.crop(box)).getbbox(), box
+    if len(boxes) == 2:  # os dois: nada entre o escudo e o 0KM
+        gap = (boxes[0][2], boxes[0][1], boxes[1][0], boxes[0][3])
+        assert ImageChops.difference(img.crop(gap), ref.crop(gap)).getbbox() is None
+
+
+def test_cover_badges_km_none_is_not_zero_km():
+    d = replace(_plain(), km=None)
+    assert render.cover_badges(d) == []
+    for box in ALL_BADGE_BOXES:
+        assert ImageChops.difference(render.render_cover(d, _photo()).crop(box),
+                                     render.render_cover(replace(d, km=None), _photo()).crop(box)).getbbox() is None
+    assert [n for n, _ in render.cover_badges(replace(d, armored=True))] == ["selo_blindado.png"]
+
+
+def test_cover_badges_only_on_cover(photo_fetch):
+    d = _plain()
+    urls = d.photos[:3]
+    plain = render.build_post(d, urls)
+    render._SLIDE_CACHE.clear()
+    badged = render.build_post(replace(d, armored=True, km=0), urls)
+    assert plain[0] != badged[0]  # capa muda (e a chave do cache distingue armored)
+    assert plain[1:] == badged[1:]
+
+
+def test_badge_fits_box_keeping_aspect():
+    for name, box in [("selo_blindado.png", render.BADGE_ARMORED), ("selo_0km.png", render.BADGE_ZERO_KM),
+                      ("selo_blindado.png", render.BADGE_PAIR_ARMORED), ("selo_0km.png", render.BADGE_PAIR_ZERO_KM)]:
+        badge, (x, y) = render._badge(name, box)
+        assert badge.mode == "RGBA"
+        assert box[0] <= x and box[1] <= y and x + badge.width <= box[2] and y + badge.height <= box[3]
+        assert badge.width == box[2] - box[0] or badge.height == box[3] - box[1]
+
+
 def _ink_bbox(d_full, d_empty):
     a = render.render_cover(d_full, _photo())
     b = render.render_cover(d_empty, _photo())

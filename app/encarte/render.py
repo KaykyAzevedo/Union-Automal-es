@@ -37,6 +37,14 @@ CENTS_BOX = (970, 1020, 1040, 1060)     # ",00" impresso no fundo (coberto quand
 CENTS_PATCH_SRC_X = 895                  # de onde copiar fundo liso da caixa para cobrir o ",00"
 ITALIC_SHEAR = 0.21                      # inclinação sintética (~12°)
 
+# selos no canto superior da moldura: bbox medido por diff de docs/referencia/capa_{blindado,0km,blindado_0km}.png
+# contra capa_exemplo.png, ajustado ±1 px pelo menor erro; o selo é encaixado na caixa mantendo a proporção
+BADGE_ARMORED = (110, 265, 283, 468)        # só blindado
+BADGE_ZERO_KM = (108, 257, 280, 426)        # só 0 km
+BADGE_PAIR_ARMORED = (110, 267, 259, 443)   # os dois: escudo à esquerda, um pouco menor
+BADGE_PAIR_ZERO_KM = (790, 272, 963, 442)   # os dois: 0KM à direita
+BADGE_ALPHA_TRIM = 8                        # alfa <= isto é borda vazia do PNG
+
 # ---- demais fotos -----------------------------------------------------------
 PHOTO_BOX = (0, 253, 1080, 1059)         # entre a linha vermelha do cabeçalho e a do rodapé
 
@@ -44,6 +52,44 @@ PHOTO_BOX = (0, 253, 1080, 1059)         # entre a linha vermelha do cabeçalho 
 @lru_cache(maxsize=2)
 def _base(name: str) -> Image.Image:
     return Image.open(ASSETS / name).convert("RGB")
+
+
+@lru_cache(maxsize=4)
+def _badge(name: str, box: tuple[int, int, int, int]) -> tuple[Image.Image, tuple[int, int]]:
+    """Selo RGBA sem a borda transparente, redimensionado (LANCZOS) para caber na caixa."""
+    img = Image.open(ASSETS / name).convert("RGBA")
+    img = img.crop(img.getchannel("A").point(lambda a: 255 if a > BADGE_ALPHA_TRIM else 0).getbbox())
+    x0, y0, x1, y1 = box
+    scale = min((x1 - x0) / img.width, (y1 - y0) / img.height)
+    w, h = round(img.width * scale), round(img.height * scale)
+    return img.resize((w, h), Image.Resampling.LANCZOS), (x0 + (x1 - x0 - w) // 2, y0 + (y1 - y0 - h) // 2)
+
+
+def is_zero_km(detail) -> bool:
+    return detail.km == 0
+
+
+def cover_badges(detail) -> list[tuple[str, tuple[int, int, int, int]]]:
+    """(arquivo, caixa) dos selos da capa: blindado = detail.armored, 0 km = km == 0 (None não conta)."""
+    armored, zero = bool(getattr(detail, "armored", False)), is_zero_km(detail)
+    if armored and zero:
+        return [("selo_blindado.png", BADGE_PAIR_ARMORED), ("selo_0km.png", BADGE_PAIR_ZERO_KM)]
+    if armored:
+        return [("selo_blindado.png", BADGE_ARMORED)]
+    if zero:
+        return [("selo_0km.png", BADGE_ZERO_KM)]
+    return []
+
+
+def _paste_badges(img: Image.Image, detail) -> Image.Image:
+    badges = cover_badges(detail)
+    if not badges:
+        return img
+    out = img.convert("RGBA")
+    for name, box in badges:
+        badge, pos = _badge(name, box)
+        out.alpha_composite(badge, pos)
+    return out.convert("RGB")
 
 
 def cover_fit(photo: Image.Image, size: tuple[int, int], zoom: float = 1.0,
@@ -211,7 +257,7 @@ def render_cover(detail, photo: Image.Image) -> Image.Image:
         _draw(img, "CONSULTE", **PRICE_CONSULT)
     else:
         _draw(img, price, **PRICE)
-    return img
+    return _paste_badges(img, detail)
 
 
 def render_photo(photo: Image.Image) -> Image.Image:
@@ -237,7 +283,8 @@ def slide_png(detail, url: str, cover: bool) -> bytes:
     from .photos import load_photo
 
     key = (url, cover) + ((detail.brand, detail.model, detail.version, detail.year_fab, detail.year_model,
-                           detail.km, detail.price_cents) if cover else ())
+                           detail.km, detail.price_cents, bool(getattr(detail, "armored", False)))
+                          if cover else ())
     with _slide_lock:
         if key in _SLIDE_CACHE:
             _SLIDE_CACHE.move_to_end(key)
