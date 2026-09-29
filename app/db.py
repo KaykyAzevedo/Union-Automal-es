@@ -177,6 +177,15 @@ def migrate(conn) -> None:
              AND first_seen = (SELECT MIN(first_seen) FROM cars WHERE external_id NOT LIKE 'demo-%')
              AND NOT EXISTS (SELECT 1 FROM cars WHERE in_baseline = 1)"""
     )
+    # F9: carro sem foto não conta como postado. Corrige os que entraram como posted=1 sem foto
+    # (baseline antigo) e nunca tiveram chamado, para ganharem chamado quando a foto aparecer.
+    # Idempotente: posted=1 só vem de baseline com foto ou de chamado concluído.
+    conn.execute(
+        """UPDATE cars SET posted = 0
+           WHERE posted = 1 AND active = 1 AND photo_url IS NULL
+             AND external_id NOT LIKE 'demo-%'
+             AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.car_id = cars.id)"""
+    )
     conn.commit()
 
 

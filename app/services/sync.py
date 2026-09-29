@@ -66,13 +66,26 @@ def match_all(conn: sqlite3.Connection, scraped: list, seen: set[int]):
         yield item, car
 
 
+def _open_ticket(conn: sqlite3.Connection, car_id: int, ts: str) -> None:
+    conn.execute("INSERT INTO tickets (car_id, status, created_at) VALUES (?, 'pending', ?)", (car_id, ts))
+
+
+def _photo_arrived(conn: sqlite3.Connection, car, item) -> bool:
+    """Carro não postado e sem nenhum chamado que estava sem foto e agora tem: vira "carro novo"."""
+    if car.posted or car.photo_url or not item.photo_url or car.external_id.startswith(DEMO_PREFIX):
+        return False
+    return conn.execute("SELECT 1 FROM tickets WHERE car_id = ?", (car.id,)).fetchone() is None
+
+
 def run_poll(conn: sqlite3.Connection, scraped: list) -> dict:
     """Processa uma coleta.
 
     Retorna {found, new, baseline, deactivated, sold, new_car_ids, sold_car_ids}.
     Banco sem carros reais (demo não conta) → baseline: tudo entra como já
-    postado, sem chamados. Ausências e vendidos: ver sold.track_missing
-    (só se a coleta não veio vazia).
+    postado, sem chamados. Carro sem foto não está pronto para postar: entra
+    com posted=0 e sem chamado (também no baseline); o chamado abre quando a
+    foto aparecer (ver _photo_arrived). Ausências e vendidos: ver
+    sold.track_missing (só se a coleta não veio vazia).
     """
     ts = to_iso(now())
     baseline = conn.execute(
@@ -84,14 +97,15 @@ def run_poll(conn: sqlite3.Connection, scraped: list) -> dict:
     for item, car in match_all(conn, scraped, seen):
         if car is not None:
             refresh_car(conn, car.id, item, ts)
+            if _photo_arrived(conn, car, item):
+                _open_ticket(conn, car.id, ts)
+                new_ids.append(car.id)
             continue
-        car_id = insert_car(conn, item, posted=baseline, ts=ts, baseline=baseline)
+        has_photo = bool(item.photo_url)
+        car_id = insert_car(conn, item, posted=baseline and has_photo, ts=ts, baseline=baseline)
         seen.add(car_id)
-        if not baseline:
-            conn.execute(
-                "INSERT INTO tickets (car_id, status, created_at) VALUES (?, 'pending', ?)",
-                (car_id, ts),
-            )
+        if not baseline and has_photo:
+            _open_ticket(conn, car_id, ts)
             new_ids.append(car_id)
 
     sold_ids = track_missing(conn, seen, ts) if seen else []

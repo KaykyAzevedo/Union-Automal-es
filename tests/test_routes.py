@@ -37,7 +37,12 @@ def test_health(client):
 
 
 def test_dashboard_renders_ticket_with_none_price_and_photo(client, car):
-    _seed(car, [car("1")], [car("1"), car("2", "Fiat Uno Mille 2010", price=None, photo=None)])
+    _seed(car, [car("1")], [car("1"), car("2", "Fiat Uno Mille 2010", price=None)])
+    # F9: carro novo sem foto não abre chamado; aqui a foto some depois (ex.: chamado anterior à F9)
+    conn = db.connect()
+    conn.execute("UPDATE cars SET photo_url = NULL WHERE external_id = '2'")
+    conn.commit()
+    conn.close()
     r = client.get("/")
     assert r.status_code == 200
     assert "Fiat Uno Mille 2010" in r.text

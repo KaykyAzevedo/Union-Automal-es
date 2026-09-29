@@ -1,6 +1,8 @@
 """F1 — poll: baseline, carros novos → chamados, idempotência, desativação (app/services/sync.py)."""
 from __future__ import annotations
 
+from app import db
+from app.services.queries import mark_ticket_done
 from app.services.sync import run_poll
 
 
@@ -28,7 +30,7 @@ def test_baseline_with_empty_scrape_keeps_db_empty(conn, car):
 
 def test_new_car_after_baseline_creates_one_pending_ticket(conn, car):
     run_poll(conn, [car("1"), car("2")])
-    r = run_poll(conn, [car("1"), car("2"), car("3", photo=None)])
+    r = run_poll(conn, [car("1"), car("2"), car("3")])
     assert r["baseline"] is False and r["new"] == 1
     rows = conn.execute("SELECT t.status, c.external_id, c.posted FROM tickets t JOIN cars c ON c.id=t.car_id").fetchall()
     assert [tuple(x) for x in rows] == [("pending", "3", 0)]
@@ -107,3 +109,71 @@ def test_new_homonym_of_sold_car_gets_ticket(conn, car):
     assert r["new"] == 1
     assert _count(conn, "SELECT COUNT(*) FROM cars") == 3
     assert _count(conn, "SELECT active FROM cars WHERE external_id='1'") == 0
+
+
+# --- F9: carro sem foto não está pronto para postar ---------------------------------
+
+def _car_row(conn, ext):
+    return conn.execute("SELECT id, posted, photo_url FROM cars WHERE external_id = ?", (ext,)).fetchone()
+
+
+def _tickets(conn, ext):
+    return conn.execute("SELECT t.status FROM tickets t JOIN cars c ON c.id = t.car_id WHERE c.external_id = ?",
+                        (ext,)).fetchall()
+
+
+def test_new_car_without_photo_gets_no_ticket(conn, car):
+    run_poll(conn, [car("1")])
+    r = run_poll(conn, [car("1"), car("2", price=None, photo=None)])
+    assert r["new"] == 0 and r["new_car_ids"] == []
+    assert _tickets(conn, "2") == [] and _car_row(conn, "2")["posted"] == 0
+
+
+def test_photo_arrives_opens_ticket_once(conn, car):
+    run_poll(conn, [car("1")])
+    run_poll(conn, [car("1"), car("2", photo=None)])
+    r = run_poll(conn, [car("1"), car("2")])
+    car_id = _car_row(conn, "2")["id"]
+    assert r["new"] == 1 and r["new_car_ids"] == [car_id]
+    assert [t[0] for t in _tickets(conn, "2")] == ["pending"]
+    for _ in range(2):  # coletas seguintes não duplicam
+        assert run_poll(conn, [car("1"), car("2")])["new"] == 0
+    assert len(_tickets(conn, "2")) == 1
+
+
+def test_baseline_car_without_photo_is_not_posted_then_gets_ticket(conn, car):
+    r = run_poll(conn, [car("1"), car("2", price=None, photo=None)])
+    assert r["baseline"] is True
+    assert _car_row(conn, "1")["posted"] == 1 and _car_row(conn, "2")["posted"] == 0
+    assert _count(conn, "SELECT COUNT(*) FROM tickets") == 0
+    r = run_poll(conn, [car("1"), car("2")])
+    assert r["new"] == 1 and [t[0] for t in _tickets(conn, "2")] == ["pending"]
+
+
+def test_migration_unposts_photoless_cars_without_tickets(conn, car):
+    run_poll(conn, [car("1"), car("2")])
+    run_poll(conn, [car("1"), car("2"), car("3")])  # 3 ganha chamado
+    ticket_id = conn.execute("SELECT id FROM tickets").fetchone()[0]
+    mark_ticket_done(conn, ticket_id)
+    # estado antigo (pré-F9): baseline sem foto posted=1; 3 postado via chamado, depois sem foto; demo sem foto
+    conn.execute("UPDATE cars SET photo_url = NULL WHERE external_id IN ('2', '3')")
+    conn.execute("""INSERT INTO cars (external_id, name, name_key, url, posted, active, first_seen, last_seen)
+                    VALUES ('demo-9', 'Demo', 'demo', 'u', 1, 1, 'x', 'x')""")
+    conn.commit()
+    for _ in range(2):  # idempotente
+        db.migrate(conn)
+        assert _car_row(conn, "1")["posted"] == 1  # postado com foto: intacto
+        assert _car_row(conn, "2")["posted"] == 0  # corrigido
+        assert _car_row(conn, "3")["posted"] == 1  # teve chamado: não reabre
+        assert _car_row(conn, "demo-9")["posted"] == 1
+    r = run_poll(conn, [car("1"), car("2"), car("3")])  # foto volta
+    assert r["new_car_ids"] == [_car_row(conn, "2")["id"]]
+    assert [t[0] for t in _tickets(conn, "3")] == ["done"]
+
+
+def test_posted_car_with_photo_untouched(conn, car):
+    run_poll(conn, [car("1")])
+    for _ in range(2):
+        assert run_poll(conn, [car("1")])["new"] == 0
+    db.migrate(conn)
+    assert _car_row(conn, "1")["posted"] == 1 and _tickets(conn, "1") == []
