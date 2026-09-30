@@ -9,6 +9,7 @@ import re
 import unicodedata
 import zipfile
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -189,6 +190,27 @@ def _chosen_urls(detail, photos: str | None) -> list[str]:
     return [detail.photos[i] for i in idx]
 
 
+MAX_MANUAL_PRICE = 100_000_000  # R$
+_PRICE_RE = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d+)(?:,0{1,2})?")
+
+
+def parse_manual_price(price: str | None) -> int | None:
+    """`price` em reais inteiros ('125900', '125.900', '125.900,00') → centavos; vazio → None."""
+    if price is None or not price.strip():
+        return None
+    m = _PRICE_RE.fullmatch(price.strip())
+    reais = int(m.group(1).replace(".", "")) if m else 0
+    if not 0 < reais <= MAX_MANUAL_PRICE:
+        raise HTTPException(400, f"price inválido: use reais inteiros entre 1 e {MAX_MANUAL_PRICE}, ex.: 125900")
+    return reais * 100
+
+
+def _with_price(detail, price: str | None):
+    """Cópia do detalhe com o preço manual (só para renderizar/legenda; banco e cache intactos)."""
+    cents = parse_manual_price(price)
+    return detail if cents is None else replace(detail, price_cents=cents)
+
+
 def _png(detail, url: str, cover: bool) -> bytes:
     import httpx
 
@@ -236,8 +258,10 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
 
 
 @app.get("/encarte/{car_id}/slide/{n}.png")
-def encarte_slide(car_id: int, n: int, photos: str | None = None, conn=Depends(db.get_conn)):
-    detail = _detail_or_502(_car_or_404(conn, car_id), conn)
+def encarte_slide(car_id: int, n: int, photos: str | None = None, price: str | None = None,
+                  conn=Depends(db.get_conn)):
+    parse_manual_price(price)  # 400 antes de raspar
+    detail = _with_price(_detail_or_502(_car_or_404(conn, car_id), conn), price)
     urls = _chosen_urls(detail, photos)
     if not 0 <= n < len(urls):
         raise HTTPException(404, "Slide inexistente")
@@ -246,8 +270,9 @@ def encarte_slide(car_id: int, n: int, photos: str | None = None, conn=Depends(d
 
 
 @app.get("/encarte/{car_id:int}.zip")
-def encarte_zip(car_id: int, photos: str | None = None, conn=Depends(db.get_conn)):
-    detail = _detail_or_502(_car_or_404(conn, car_id), conn)
+def encarte_zip(car_id: int, photos: str | None = None, price: str | None = None, conn=Depends(db.get_conn)):
+    parse_manual_price(price)
+    detail = _with_price(_detail_or_502(_car_or_404(conn, car_id), conn), price)
     urls = _chosen_urls(detail, photos)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # PNG já é comprimido
@@ -260,9 +285,10 @@ def encarte_zip(car_id: int, photos: str | None = None, conn=Depends(db.get_conn
 
 
 @app.get("/encarte/{car_id}/caption.txt", response_class=PlainTextResponse)
-def encarte_caption(car_id: int, conn=Depends(db.get_conn)):
-    return PlainTextResponse(build_caption(_detail_or_502(_car_or_404(conn, car_id), conn)),
-                             media_type="text/plain; charset=utf-8")
+def encarte_caption(car_id: int, price: str | None = None, conn=Depends(db.get_conn)):
+    parse_manual_price(price)
+    detail = _with_price(_detail_or_502(_car_or_404(conn, car_id), conn), price)
+    return PlainTextResponse(build_caption(detail), media_type="text/plain; charset=utf-8")
 
 
 # ---- F5: jobs via HTTP (Vercel Cron / agendador externo) -------------------------

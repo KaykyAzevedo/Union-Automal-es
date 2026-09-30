@@ -559,3 +559,80 @@ def test_safety_cap(client, cars, many_photos, photo_fetch):
     assert client.get(f"/encarte/{cars['5575766']}/slide/0.png?photos={ids}").status_code == 400
     assert client.get(f"/encarte/{cars['5575766']}/slide/{MAX_SLIDES - 1}.png").status_code == 200
     assert client.get(f"/encarte/{cars['5575766']}/slide/{MAX_SLIDES}.png").status_code == 404
+
+
+# --- F12: preço manual (?price=, reais inteiros) ----------------------------------
+
+PRICE_REGION = (560, 980, 1045, 1075)  # número grande + ",00" da capa
+
+
+@pytest.mark.parametrize("raw, cents", [
+    (None, None), ("", None), ("  ", None), ("125900", 12_590_000), ("125.900", 12_590_000),
+    ("125.900,00", 12_590_000), ("125900,0", 12_590_000), (" 1.250.000 ", 125_000_000), ("100000000", 10_000_000_000),
+])
+def test_parse_manual_price_formats(raw, cents):
+    from app.main import parse_manual_price
+
+    assert parse_manual_price(raw) == cents
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-5", "100000001", "125,50", "1.23", "12.34.567", "125900.00", "R$ 10"])
+def test_parse_manual_price_invalid(raw):
+    from fastapi import HTTPException
+
+    from app.main import parse_manual_price
+
+    with pytest.raises(HTTPException) as exc:
+        parse_manual_price(raw)
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.parametrize("q", ["abc", "0", "-1", "100000001", "125,50"])
+def test_manual_price_invalid_400_on_routes(client, cars, scrape, photo_fetch, q):
+    cid = cars["5575766"]
+    for path in (f"/encarte/{cid}/slide/0.png", f"/encarte/{cid}.zip", f"/encarte/{cid}/caption.txt"):
+        assert client.get(path, params={"price": q}).status_code == 400, path
+
+
+def test_manual_price_cover_and_cache(client, cars, scrape, photo_fetch):
+    cid = cars["5575766"]
+    site = client.get(f"/encarte/{cid}/slide/0.png").content
+    manual = client.get(f"/encarte/{cid}/slide/0.png?price=125900").content
+    assert manual != site
+    a, b = (Image.open(io.BytesIO(x)).convert("RGB") for x in (site, manual))
+    diff = ImageChops.difference(a, b).getbbox()
+    assert diff and PRICE_REGION[0] <= diff[0] and PRICE_REGION[1] <= diff[1] \
+        and diff[2] <= PRICE_REGION[2] and diff[3] <= PRICE_REGION[3]
+    # cache não mistura: sem price volta o do site; outro formato do mesmo preço = mesma capa
+    assert client.get(f"/encarte/{cid}/slide/0.png").content == site
+    assert client.get(f"/encarte/{cid}/slide/0.png?price=").content == site
+    assert client.get(f"/encarte/{cid}/slide/0.png", params={"price": "125.900,00"}).content == manual
+    assert client.get(f"/encarte/{cid}/slide/0.png?price=99000").content not in (site, manual)
+    # slides n>0 não mudam
+    assert client.get(f"/encarte/{cid}/slide/1.png?price=125900").content == \
+        client.get(f"/encarte/{cid}/slide/1.png").content
+
+
+def test_manual_price_caption_and_zip(client, cars, scrape, photo_fetch):
+    cid = cars["5575766"]
+    site = client.get(f"/encarte/{cid}/caption.txt").text
+    assert "129.900" in site
+    cap = client.get(f"/encarte/{cid}/caption.txt?price=125.900").text
+    assert "125.900" in cap and "129.900" not in cap
+    zf = _zip(client.get(f"/encarte/{cid}.zip?price=125900&photos=0,1"))
+    assert "125.900" in zf.read("legenda.txt").decode("utf-8")
+    # detalhe em cache/banco intacto
+    assert client.get(f"/encarte/{cid}/caption.txt").text == site
+    assert source.get_detail(type("C", (), {"external_id": "5575766"})()).price_cents == 12_990_000
+
+
+def test_manual_price_replaces_consult():
+    from app.main import _with_price
+
+    d = replace(detail("5575766"), price_cents=None)
+    consult = render.render_cover(d, _photo())
+    manual = render.render_cover(_with_price(d, "125900"), _photo())
+    assert _with_price(d, "125900").price_cents == 12_590_000 and d.price_cents is None
+    assert _with_price(d, None) is d
+    assert ImageChops.difference(consult.crop(render.CENTS_BOX), manual.crop(render.CENTS_BOX)).getbbox()
+    assert "sob consulta" not in build_caption(_with_price(d, "125900")).lower()

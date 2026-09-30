@@ -105,6 +105,23 @@
         <div class="slides" id="slides"></div>
       </div>
 
+      {# preço do post: só a capa e a legenda mudam #}
+      {% set site_reais = ((d.price_cents if d else sel.car.price_cents) // 100) if (d.price_cents if d else sel.car.price_cents) is not none else none %}
+      <div class="card price-card">
+        <label class="price-label" for="post-price">Preço do post</label>
+        <div class="price-row">
+          <div class="price-input">
+            <span aria-hidden="true">R$</span>
+            <input id="post-price" type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done"
+                   placeholder="Consulte" maxlength="11"
+                   value="{{ '{:,}'.format(site_reais) | replace(',', '.') if site_reais is not none else '' }}"
+                   aria-describedby="price-note">
+          </div>
+          <button type="button" class="link-btn" id="price-reset" hidden>Usar preço do site</button>
+        </div>
+        <p class="price-note muted small" id="price-note" aria-live="polite">{% if site_reais is none %}No site está "Sob consulta". Deixe vazio para manter.{% else %}Preço do site. Mude só se precisar (ex.: pedido do chefe).{% endif %}</p>
+      </div>
+
       {# ações do post: no celular fica grudada no rodapé da tela #}
       <div class="card post-actions" id="post-actions">
         <div class="post-actions-row">
@@ -121,7 +138,7 @@
         <div class="panel-head">
           <h2 class="section-title">Legenda <span class="char-count" id="caption-count" aria-live="polite"></span></h2>
           <div class="actions">
-            <a class="btn btn-ghost btn-sm" href="/encarte/{{ sel_id }}/caption.txt" download>⬇ .txt</a>
+            <a class="btn btn-ghost btn-sm" id="caption-txt" href="/encarte/{{ sel_id }}/caption.txt" download>⬇ .txt</a>
             <button type="button" class="btn btn-accent btn-sm" id="copy-caption">⧉ Copiar</button>
           </div>
         </div>
@@ -131,6 +148,7 @@
       <script>
         window.ENCARTE = {
           carId: {{ sel_id | tojson }},
+          sitePrice: {{ site_reais | tojson if site_reais is defined else 'null' }},
           zipParts: [{{ (d.brand if d and d.brand else '') | tojson }}, {{ (d.model if d and d.model else sel.car.name) | tojson }}, {{ ((d.year_model or d.year_fab or '') if d else '') | tojson }}],
           photos: [{% for p in sel.photos %}{"index": {{ p.index | int }}, "url": {{ p.url | tojson }}}{{ "," if not loop.last }}{% endfor %}]
         };
@@ -204,6 +222,11 @@
   var dragFrom = null;
 
   function qs() { return 'photos=' + chosen.join(','); }
+  // Preço do post em reais inteiros; null = preço do site (não manda o parâmetro).
+  var postPrice = null;
+  function priceQs() { return postPrice !== null && postPrice !== cfg.sitePrice ? '&price=' + postPrice : ''; }
+  // só a capa (slide 0) leva o preço
+  function slideSrc(n, q) { return '/encarte/' + cfg.carId + '/slide/' + n + '.png?' + q + (n === 0 ? priceQs() : ''); }
   function pad(n) { return (n < 9 ? '0' : '') + (n + 1); }
 
   function tile(idx, pos) {
@@ -291,8 +314,8 @@
   var timer = null;
   var CONCURRENCY = 4, RETRY_DELAYS = [1000, 3000];
   var gen = 0, queue = [], active = 0, pending = 0, failed = 0;
-  // cancela os downloads da prévia antiga quando as fotos mudam (não acumula requisições na Vercel)
-  var genAbort = window.AbortController ? new AbortController() : null;
+  // cada slide tem seu AbortController: mudar as fotos cancela todos; mudar o preço cancela só a capa
+  function newCtrl() { return window.AbortController ? new AbortController() : null; }
 
   function setStatus() {
     var parts = [];
@@ -327,14 +350,16 @@
   // Cada job ocupa um slot só enquanto a requisição está em andamento; na espera
   // do retry o slot fica livre e o job volta para o início da fila.
   function makeJob(slide, tryN) {
-    var myGen = gen, n = tryN || 0, signal = genAbort && genAbort.signal;
+    var myGen = gen, n = tryN || 0, myTok = slide.token, signal = slide.ctrl && slide.ctrl.signal;
+    // job velho: geração antiga (fotos mudaram) ou capa refeita (preço mudou)
+    function stale() { return myGen !== gen || myTok !== slide.token; }
     return { gen: myGen, run: function () {
       function release() { if (myGen === gen) active = Math.max(0, active - 1); pump(); }
       var fresh = n > 0 || slide.manual;
       // cache-buster só nas novas tentativas, para não reaproveitar a resposta com erro
       fetchPng(fresh ? bust(slide.src, n) : slide.src, fresh, signal).then(function (blob) {
-        if (myGen !== gen) return release();
-        slide.blob = blob;
+        if (stale()) return release();
+        slide.blob = blob; slide.done = true;
         slide._res(blob);
         slide.objUrl = URL.createObjectURL(blob);
         slide.img.src = slide.objUrl;
@@ -343,12 +368,12 @@
         slide.note.textContent = '';
         pending = Math.max(0, pending - 1); setStatus(); release();
       }).catch(function (err) {
-        if (myGen !== gen) return release();
+        if (stale()) return release();
         if (n < RETRY_DELAYS.length) {
           slide.fig.classList.add('is-retrying');
           slide.note.textContent = 'tentando de novo (' + (n + 1) + '/' + RETRY_DELAYS.length + ')…';
           setTimeout(function () {
-            if (myGen !== gen) return;
+            if (stale()) return;
             queue.unshift(makeJob(slide, n + 1)); pump();
           }, RETRY_DELAYS[n]);
           release();
@@ -356,6 +381,7 @@
         }
         slide.fig.classList.remove('is-loading', 'is-retrying');
         slide.fig.classList.add('is-error');
+        slide.done = true; slide.failed = true;
         slide._rej(err);
         pending = Math.max(0, pending - 1); failed++; setStatus(); release();
       });
@@ -378,9 +404,9 @@
   function renderSlides() {
     gen++;
     resetShare();
-    if (genAbort) { genAbort.abort(); genAbort = new AbortController(); }
     queue = []; active = 0; failed = 0; pending = chosen.length;
     slides.forEach(function (sl) {
+      if (sl.ctrl) sl.ctrl.abort();
       if (sl.objUrl) URL.revokeObjectURL(sl.objUrl);
       if (!sl.blob && sl._rej) sl._rej(new Error('prévia descartada'));
     });
@@ -388,7 +414,7 @@
     var q = qs();
     slidesEl.innerHTML = '';
     chosen.forEach(function (_, n) {
-      var src = '/encarte/' + cfg.carId + '/slide/' + n + '.png?' + q;
+      var src = slideSrc(n, q);
       var fig = document.createElement('figure');
       fig.className = 'slide is-loading';
       var frame = document.createElement('div');
@@ -400,13 +426,15 @@
       var retry = document.createElement('button');
       retry.type = 'button'; retry.className = 'btn btn-sm btn-primary slide-retry';
       retry.textContent = '↻ Tentar de novo';
-      var slide = { n: n, fig: fig, img: img, note: note, src: src, blob: null, objUrl: null, dl: null };
+      var slide = { n: n, fig: fig, img: img, note: note, src: src, blob: null, objUrl: null, dl: null,
+                    ctrl: newCtrl(), token: 0, done: false, failed: false };
       slides.push(slide);
       armReady(slide);
       retry.addEventListener('click', function () {
         fig.classList.remove('is-error'); fig.classList.add('is-loading');
         note.textContent = '';
         failed = Math.max(0, failed - 1); pending++; setStatus();
+        slide.done = false; slide.failed = false;
         slide.manual = true;  // clique manual: recomeça com 2 retries e cache-buster
         armReady(slide);
         enqueue(slide);
@@ -713,6 +741,124 @@
         zipState(failMsg(err, 'preparar as imagens'), 'error');
       }).then(function () { busy = false; setButtons(false); });
   });
+
+  // ----- Preço do post (só existe quando o anúncio tem fotos) -----
+  if (document.getElementById('post-price')) (function () {
+  var priceEl = document.getElementById('post-price');
+  var priceReset = document.getElementById('price-reset');
+  var priceNote = document.getElementById('price-note');
+  var captionTxt = document.getElementById('caption-txt');
+  var captionBase = captionEl.value;   // última legenda vinda do servidor (para saber se o usuário editou)
+  var priceTimer = null, applied = null;
+
+  function fmtReais(v) { return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+  function readPrice() {
+    var digits = priceEl.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, 9);
+    return digits ? parseInt(digits, 10) : null;
+  }
+  function effectivePrice() { return postPrice !== null ? postPrice : cfg.sitePrice; }
+  function moneyLine() {
+    var v = effectivePrice();
+    return v !== null && v !== undefined ? '💰 R$ ' + fmtReais(v) + ',00' : '💰 Preço sob consulta';
+  }
+
+  // formata enquanto digita (R$ 125.900), mantendo o cursor no fim
+  priceEl.addEventListener('input', function () {
+    var v = readPrice();
+    priceEl.value = v === null ? '' : fmtReais(v);
+    clearTimeout(priceTimer);
+    // no debounce só aplica valores "completos" (evita gerar capa com R$ 12 no meio da digitação)
+    priceTimer = setTimeout(function () { applyPrice(false); }, 600);
+  });
+  priceEl.addEventListener('blur', function () { clearTimeout(priceTimer); applyPrice(true); });
+  priceEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); priceEl.blur(); } });
+  priceReset.addEventListener('click', function () {
+    priceEl.value = cfg.sitePrice !== null ? fmtReais(cfg.sitePrice) : '';
+    clearTimeout(priceTimer);
+    applyPrice(true);
+  });
+
+  function applyPrice(final) {
+    var v = readPrice();
+    if (v === null) {
+      v = null;                                   // vazio = preço do site
+      if (final && cfg.sitePrice !== null) priceEl.value = fmtReais(cfg.sitePrice);
+    } else if (v < 1000) {
+      if (!final) return;                         // ainda digitando
+      // valor baixo demais é quase sempre engano de digitação: volta ao preço anterior
+      var prev = applied !== null ? applied : cfg.sitePrice;
+      priceEl.value = prev !== null ? fmtReais(prev) : '';
+      priceNote.textContent = 'R$ ' + fmtReais(v) + ' parece baixo demais — digite o valor em reais, ex.: 125900.';
+      return;
+    }
+    var next = (v === null || v === cfg.sitePrice) ? null : v;
+    if (next === applied) return;
+    applied = next;
+    postPrice = next;
+    priceReset.hidden = postPrice === null;
+    priceEl.classList.toggle('is-custom', postPrice !== null);
+    priceNote.textContent = postPrice === null
+      ? (cfg.sitePrice !== null ? 'Preço do site.' : 'No site está "Sob consulta".')
+      : 'Preço alterado: a capa e a legenda usam R$ ' + fmtReais(postPrice) + '.';
+    if (captionTxt) captionTxt.href = '/encarte/' + cfg.carId + '/caption.txt' + (priceQs() ? '?' + priceQs().slice(1) : '');
+    refreshCover();
+    refreshCaption();
+  }
+
+  // Refaz só a capa: as outras imagens (e os blobs já prontos) continuam valendo.
+  function refreshCover() {
+    var sl = slides[0];
+    if (!sl) return;
+    resetShare();                          // "Compartilhar agora" precisa da capa nova
+    if (sl.ctrl) sl.ctrl.abort();
+    sl.ctrl = newCtrl();
+    sl.token++;
+    if (!sl.done && !sl.blob && sl._rej) sl._rej(new Error('capa trocada'));
+    if (sl.done) { pending++; if (sl.failed) failed = Math.max(0, failed - 1); }
+    sl.done = false; sl.failed = false; sl.blob = null;
+    if (sl.objUrl) { URL.revokeObjectURL(sl.objUrl); sl.objUrl = null; }
+    sl.src = slideSrc(0, qs());
+    sl.dl.href = sl.src;
+    sl.fig.classList.remove('is-error'); sl.fig.classList.add('is-loading');
+    sl.note.textContent = '';
+    armReady(sl);
+    queue.unshift(makeJob(sl));            // capa na frente da fila
+    setStatus();
+    pump();
+  }
+
+  // Legenda: sem edição manual → recarrega do servidor; com edição → troca só a linha do preço (💰 …).
+  function refreshCaption() {
+    var edited = captionEl.value !== captionBase;
+    if (edited) {
+      var re = /^💰.*$/m;
+      if (re.test(captionEl.value)) {
+        captionEl.value = captionEl.value.replace(re, moneyLine());
+        priceNote.textContent += ' Na legenda editada, troquei só a linha do preço.';
+      } else {
+        priceNote.textContent += ' Sua legenda editada não tem a linha 💰 — confira o preço nela.';
+      }
+      updateCount();
+      return;
+    }
+    var url = '/encarte/' + cfg.carId + '/caption.txt' + (priceQs() ? '?' + priceQs().slice(1) : '');
+    var want = applied;
+    fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (text) {
+      if (want !== applied) return;                          // o preço mudou de novo nesse meio tempo
+      if (captionEl.value !== captionBase) return;           // o usuário começou a editar: não sobrescreve
+      captionEl.value = captionBase = text;
+      updateCount();
+    }).catch(function () {
+      // sem a rota: troca só a linha do preço no texto atual
+      if (want !== applied || captionEl.value !== captionBase) return;
+      captionEl.value = captionBase = captionEl.value.replace(/^💰.*$/m, moneyLine());
+      updateCount();
+    });
+  }
+  })();
 
   // Sem fotos: não há prévia nem ZIP (as rotas devolvem 422).
   if (chosen.length) {

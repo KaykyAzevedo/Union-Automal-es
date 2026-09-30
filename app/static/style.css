@@ -721,6 +721,34 @@ details[open] > .picker-summary::after { content: "\25B4"; }
   .panel-head .actions .btn { flex: 1; }
 }
 
+/* ---------- preço do post (F12) ---------- */
+.price-card { padding: 14px 18px; box-shadow: none; display: flex; flex-direction: column; gap: 6px; }
+.price-label { font-weight: 800; font-size: 14px; }
+.price-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.price-input {
+  display: flex; align-items: center; gap: 6px; padding: 0 12px; min-height: 48px; width: 220px; max-width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+}
+.price-input:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.price-input span { font-weight: 800; color: var(--muted); }
+.price-input input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 20px; font-weight: 800; letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+}
+.price-input:has(input.is-custom) { border-color: var(--warn); background: var(--warn-soft); }
+.price-input input.is-custom { color: var(--warn); }
+.link-btn {
+  border: 0; background: none; padding: 8px 2px; min-height: 44px; cursor: pointer;
+  color: var(--accent); font: inherit; font-weight: 700; font-size: 14px; text-decoration: underline;
+}
+.link-btn[hidden] { display: none; }
+.price-note { margin: 0; }
+@media (max-width: 600px) {
+  .price-card { padding: 12px 14px; }
+  .price-input { width: 100%; }
+  .price-input input { font-size: 20px; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 800px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
