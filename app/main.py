@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from . import db
 from .services import queries
 from .services.formatting import brl, dt
-from .services import aging, jobs
+from .services import aging, finance, jobs
 from .services.jobs import daily_job, poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
@@ -90,6 +90,55 @@ def equipe(request: Request, conn=Depends(db.get_conn)):
     return templates.TemplateResponse(request, "equipe.html", aging.team_view(conn))
 
 
+# ---- F13: vendas e financeiro (admin e equipe; tudo sob /equipe/*) ----------------
+
+TEAM = [Depends(require_role(auth.ADMIN, auth.STAFF))]
+FINANCE_MSGS = {"saved", "invalid"}
+
+
+@app.get("/equipe/vendas", response_class=HTMLResponse, dependencies=TEAM)
+def equipe_vendas(request: Request, mes: str | None = None, conn=Depends(db.get_conn)):
+    """Vendas do mês (?mes=YYYY-MM, default mês atual): faturamento, gasto, lucro e marcas."""
+    return templates.TemplateResponse(request, "vendas.html", finance.sales_view(conn, mes))
+
+
+@app.get("/equipe/carro/{car_id}", response_class=HTMLResponse, dependencies=TEAM)
+def equipe_carro(request: Request, car_id: int, msg: str | None = None, conn=Depends(db.get_conn)):
+    ctx = finance.car_view(conn, car_id)
+    if ctx is None:
+        raise HTTPException(404, "Carro não encontrado")
+    ctx["msg"] = msg if msg in FINANCE_MSGS else None
+    return templates.TemplateResponse(request, "carro_financeiro.html", ctx)
+
+
+def _finance_saved(conn, car_id: int, save) -> RedirectResponse:
+    """Aplica `save(conn, car_id)` e volta para a página do carro com ?msg=saved|invalid."""
+    _car_or_404(conn, car_id)
+    return RedirectResponse(f"/equipe/carro/{car_id}?msg={'saved' if save(conn, car_id) else 'invalid'}",
+                            status_code=303)
+
+
+@app.post("/equipe/carro/{car_id}/custo", dependencies=TEAM)
+def equipe_carro_custo(car_id: int, cost: str = Form(""), conn=Depends(db.get_conn)):
+    return _finance_saved(conn, car_id, lambda c, i: finance.set_cost(c, i, cost))
+
+
+@app.post("/equipe/carro/{car_id}/venda", dependencies=TEAM)
+def equipe_carro_venda(car_id: int, sale_price: str = Form(""), conn=Depends(db.get_conn)):
+    return _finance_saved(conn, car_id, lambda c, i: finance.set_sale_price(c, i, sale_price))
+
+
+@app.post("/equipe/carro/{car_id}/despesas", dependencies=TEAM)
+def equipe_carro_despesa(car_id: int, description: str = Form(""), amount: str = Form(""),
+                         conn=Depends(db.get_conn)):
+    return _finance_saved(conn, car_id, lambda c, i: finance.add_expense(c, i, description, amount))
+
+
+@app.post("/equipe/carro/{car_id}/despesas/{expense_id}/excluir", dependencies=TEAM)
+def equipe_carro_despesa_excluir(car_id: int, expense_id: int, conn=Depends(db.get_conn)):
+    return _finance_saved(conn, car_id, lambda c, i: finance.delete_expense(c, i, expense_id))
+
+
 @app.get("/cars", response_class=HTMLResponse)
 def cars(request: Request, conn=Depends(db.get_conn)):
     return templates.TemplateResponse(request, "cars.html", {"cars": queries.all_cars(conn)})
@@ -157,7 +206,7 @@ MAX_SLIDES = 60
 
 
 def _car_or_404(conn, car_id: int):
-    car = queries.get_car(conn, car_id)
+    car = queries.get_car(conn, car_id) if finance.valid_id(car_id) else None
     if car is None:
         raise HTTPException(404, "Carro não encontrado")
     return car

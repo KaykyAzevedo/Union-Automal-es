@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 
 from ..db import now, to_iso
+from .finance import brand_of
 from .matching import find_match, normalize_name
 from .sold import DEMO_PREFIX, track_missing
 
@@ -11,11 +12,12 @@ from .sold import DEMO_PREFIX, track_missing
 def insert_car(conn: sqlite3.Connection, scraped, *, posted: bool, ts: str, baseline: bool = False) -> int:
     cur = conn.execute(
         """INSERT INTO cars (external_id, name, name_key, photo_url, price_cents, url,
-                             posted, active, first_seen, last_seen, in_baseline, listed_at, listed_at_checked)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)""",
+                             posted, active, first_seen, last_seen, in_baseline, listed_at, listed_at_checked,
+                             brand)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
         (scraped.external_id, scraped.name, normalize_name(scraped.name), scraped.photo_url,
          scraped.price_cents, scraped.url, int(posted), ts, ts, int(baseline), _listed_at(scraped),
-         getattr(scraped, "listed_at_checked", None)),
+         getattr(scraped, "listed_at_checked", None), brand_of(scraped.name)),
     )
     car_id = cur.lastrowid
     conn.execute(
@@ -36,13 +38,13 @@ def _listed_at(scraped) -> str | None:
 def refresh_car(conn: sqlite3.Connection, car_id: int, scraped, ts: str) -> None:
     """Atualiza metadados e reativa. Preço fica para o job das 18:00."""
     conn.execute(
-        """UPDATE cars SET external_id = ?, name = ?, name_key = ?,
+        """UPDATE cars SET external_id = ?, name = ?, name_key = ?, brand = ?,
                   photo_url = COALESCE(?, photo_url), url = ?, active = 1, last_seen = ?,
                   listed_at = COALESCE(?, listed_at),
                   listed_at_checked = COALESCE(?, listed_at_checked)
            WHERE id = ?""",
-        (scraped.external_id, scraped.name, normalize_name(scraped.name), scraped.photo_url,
-         scraped.url, ts, _listed_at(scraped), getattr(scraped, "listed_at_checked", None), car_id),
+        (scraped.external_id, scraped.name, normalize_name(scraped.name), brand_of(scraped.name),
+         scraped.photo_url, scraped.url, ts, _listed_at(scraped), getattr(scraped, "listed_at_checked", None), car_id),
     )
 
 

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import photo, money, input_money %}
+{% block title %}Custos · {{ car.name }}{% endblock %}
+{% block body_class %}page-equipe page-fin{% endblock %}
+
+{% block content %}
+{% set team_tab = 'vendas' if car.sold else 'estoque' %}
+{% include "partials/team_tabs.html" %}
+{% set base = '/equipe/carro/' ~ car.id %}
+{% set t = totals %}
+{% set neg = t.profit_cents is not none and t.profit_cents < 0 %}
+
+<a class="back-link" href="{{ '/equipe/vendas' if car.sold else '/equipe' }}">‹ Voltar para {{ 'Vendas' if car.sold else 'Estoque' }}</a>
+
+{# ---------- feedback do último envio ---------- #}
+{% if msg == 'saved' %}
+<div class="flash" role="status"><span>✓ Salvo.</span></div>
+{% elif msg == 'invalid' %}
+<div class="flash flash-error" role="alert"><span>⚠ Valor inválido — nada foi gravado. Use só números, por exemplo <strong>45000</strong> ou <strong>45.000,50</strong> (máximo R$ 20.000.000).</span></div>
+{% endif %}
+
+{# ---------- carro ---------- #}
+<section class="card fin-car">
+  {{ photo(car, 'fin-img') }}
+  <div class="fin-car-body">
+    {% if car.brand %}<p class="fin-brand">{{ car.brand }}</p>{% endif %}
+    <h1 class="fin-name">{{ car.name }}</h1>
+    <p class="fin-status">
+      {% if car.sold %}
+        <span class="pill pill-sold">Vendido{% if car.sold_at %} em {{ car.sold_at.strftime('%d/%m/%Y') if car.sold_at is not string else car.sold_at }}{% endif %}</span>
+      {% elif car.active %}
+        <span class="pill pill-ok">Em estoque</span>
+      {% else %}
+        <span class="pill pill-muted">Fora do site</span>
+      {% endif %}
+      <span class="muted small">Preço no site: {{ money(car.price_cents, 'sob consulta') }}</span>
+    </p>
+  </div>
+</section>
+
+{# ---------- resumo ---------- #}
+<section class="fin-totals" aria-label="Resumo do carro">
+  <div class="ftot">
+    <span class="ftot-label">{{ 'Venda' if car.sold else 'Preço' }}</span>
+    <span class="ftot-value">{{ money(t.sale_cents, 'não informado') }}</span>
+    {% if car.sold and t.sale_cents is not none and t.sale_is_estimate %}<span class="est-tag">preço do site</span>{% endif %}
+  </div>
+  <div class="ftot">
+    <span class="ftot-label">Custo</span>
+    <span class="ftot-value">{{ money(car.cost_cents, 'não informado') }}</span>
+  </div>
+  <div class="ftot">
+    <span class="ftot-label">Despesas</span>
+    <span class="ftot-value">{{ money(t.expenses_cents or 0) }}</span>
+  </div>
+  <div class="ftot ftot-profit {{ 'is-neg' if neg }}">
+    <span class="ftot-label">{{ 'Lucro' if car.sold else 'Lucro previsto' }}</span>
+    <span class="ftot-value">{{ money(t.profit_cents) }}</span>
+    {% if t.profit_cents is none %}<span class="muted small">informe {{ 'a venda' if t.sale_cents is none and car.cost_cents is not none else ('o custo e a venda' if t.sale_cents is none else 'o custo') }}</span>{% elif neg %}<span class="small">▼ prejuízo</span>{% endif %}
+  </div>
+</section>
+
+{# ---------- valor pago ---------- #}
+<section class="card panel fin-form-card">
+  <h2 class="section-title">Valor pago na compra</h2>
+  <form method="post" action="{{ base }}/custo" class="fin-form" data-loading-text="Salvando…">
+    <label class="fin-label" for="cost">Quanto a loja pagou por este carro</label>
+    <div class="fin-row">
+      <div class="money-input"><span aria-hidden="true">R$</span>
+        <input id="cost" name="cost" type="text" inputmode="decimal" maxlength="13" autocomplete="off" enterkeyhint="done"
+               placeholder="ex.: 98000" value="{{ input_money(car.cost_cents) }}">
+      </div>
+      <button type="submit" class="btn btn-primary">Salvar</button>
+    </div>
+    <p class="muted small">Deixe vazio e salve para apagar o valor.</p>
+  </form>
+</section>
+
+{# ---------- valor real da venda (só para carro vendido) ---------- #}
+{% if car.sold %}
+<section class="card panel fin-form-card">
+  <h2 class="section-title">Valor real da venda</h2>
+  <form method="post" action="{{ base }}/venda" class="fin-form" data-loading-text="Salvando…">
+    <label class="fin-label" for="sale_price">Por quanto o carro foi vendido</label>
+    <div class="fin-row">
+      <div class="money-input"><span aria-hidden="true">R$</span>
+        <input id="sale_price" name="sale_price" type="text" inputmode="decimal" maxlength="13" autocomplete="off" enterkeyhint="done"
+               placeholder="{{ input_money(car.price_cents) or 'ex.: 125000' }}" value="{{ input_money(car.sale_price_cents) }}">
+      </div>
+      <button type="submit" class="btn btn-primary">Salvar</button>
+    </div>
+    {% if car.price_cents is none %}
+    <p class="fin-need small">⚠ Este carro estava "sob consulta" no site: digite o valor da venda para ele entrar no faturamento e no lucro.</p>
+    {% else %}
+    <p class="muted small">Vazio = usa o último preço do site ({{ money(car.price_cents) }}).</p>
+    {% endif %}
+  </form>
+</section>
+{% endif %}
+
+{# ---------- despesas ---------- #}
+<section class="card panel fin-form-card">
+  <h2 class="section-title">Despesas <span class="pill">{{ expenses | length }}</span></h2>
+  {% if expenses %}
+  <ul class="exp-list">
+    {% for e in expenses %}
+    <li>
+      <div class="exp-info">
+        <span class="exp-desc">{{ e.description }}</span>
+        <span class="muted small">{{ e.created_at.strftime('%d/%m/%Y') if e.created_at and e.created_at is not string else (e.created_at or '') }}</span>
+      </div>
+      <span class="exp-amount">{{ money(e.amount_cents) }}</span>
+      <form method="post" action="{{ base }}/despesas/{{ e.id }}/excluir" class="exp-del"
+            data-confirm="Excluir a despesa &quot;{{ e.description }}&quot; ({{ money(e.amount_cents) }})?">
+        <button type="submit" class="btn btn-outline btn-sm" aria-label="Excluir despesa {{ e.description }}">Excluir</button>
+      </form>
+    </li>
+    {% endfor %}
+    <li class="exp-total"><span>Total</span><span class="exp-amount">{{ money(t.expenses_cents or 0) }}</span><span></span></li>
+  </ul>
+  {% else %}
+  <p class="muted">Nenhuma despesa lançada (funilaria, documentação, polimento, revisão…).</p>
+  {% endif %}
+
+  <form method="post" action="{{ base }}/despesas" class="fin-form exp-add" data-loading-text="Adicionando…">
+    <h3 class="fin-sub">Adicionar despesa</h3>
+    <label class="fin-label" for="description">Descrição</label>
+    <input id="description" name="description" type="text" class="input" required maxlength="200"
+           autocomplete="off" placeholder="ex.: Funilaria, IPVA, polimento">
+    <label class="fin-label" for="amount">Valor</label>
+    <div class="fin-row">
+      <div class="money-input"><span aria-hidden="true">R$</span>
+        <input id="amount" name="amount" type="text" inputmode="decimal" maxlength="13" required autocomplete="off" enterkeyhint="done" placeholder="ex.: 1.250,00">
+      </div>
+      <button type="submit" class="btn btn-accent">+ Adicionar</button>
+    </div>
+  </form>
+</section>
+
+<script>
+  // confirmação antes de excluir despesa
+  document.querySelectorAll('form[data-confirm]').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      if (!window.confirm(f.dataset.confirm)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+  });
+  // tira ?msg= da URL para o aviso não reaparecer ao recarregar a página
+  if (/[?&]msg=/.test(location.search) && history.replaceState) history.replaceState(null, '', location.pathname);
+</script>
+{% endblock %}
