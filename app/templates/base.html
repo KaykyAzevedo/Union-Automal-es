@@ -37,7 +37,11 @@
         <a href="/cars" class="{{ 'active' if path.startswith('/cars') }}">Estoque</a>
         <a href="/editor" class="{{ 'active' if path.startswith('/editor') }}">Editor</a>
         {% endif %}
-        <a href="/equipe" class="{{ 'active' if path.startswith('/equipe') }}">Equipe</a>
+        {% set in_sales = path.startswith('/equipe/vendas') %}
+        <a href="/equipe" class="{{ 'active' if path.startswith('/equipe') and not in_sales }}">Equipe</a>
+        {% if not is_staff %}
+        <a href="/equipe/vendas" class="{{ 'active' if in_sales }}">Vendas</a>
+        {% endif %}
         {% if auth_enabled is defined and auth_enabled %}
         <form method="post" action="/logout" class="logout-form">
           <button type="submit" class="nav-logout" title="Sair do painel">Sair</button>

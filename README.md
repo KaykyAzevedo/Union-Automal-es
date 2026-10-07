@@ -60,6 +60,33 @@ dias em estoque, com sugestão de redução de preço. Regras em `app/services/a
   viu o carro pela 1ª vez. Carros do registro inicial (1ª coleta) mostram
   "há pelo menos X dias", porque a entrada real é anterior.
 
+## Vendas e financeiro (`/equipe/vendas`, `/equipe/carro/{id}`)
+
+Visível e editável por **admin e equipe** (tudo sob `/equipe/*`). Regras em
+`app/services/finance.py`:
+
+- **Venda** = carro marcado como vendido pela verificação (sumiu do site por 2 coletas).
+  O mês da venda é o de `sold_at` no fuso de São Paulo. Se o carro reaparecer no site, sai
+  das vendas sozinho. `/equipe/vendas?mes=YYYY-MM` escolhe o mês (padrão: mês atual).
+- **Faturamento** = valor real da venda digitado pela equipe; sem ele, o último preço do
+  site (aparece como estimativa).
+- **Por carro** (`/equipe/carro/{id}`): a equipe registra o **valor pago** na compra, o
+  **valor da venda** e as **despesas** (descrição + valor). Valores em reais: `45000`,
+  `45.000` ou `45.000,50`. Campo vazio no valor pago = limpar; vazio na venda = voltar ao
+  preço do site.
+- **Lucro** = venda − valor pago − despesas, só para carros com valor pago. Carro vendido
+  sem valor pago entra no faturamento, mas não no gasto nem no lucro (contado em
+  "sem custo"). O mesmo vale para carro vendido sem valor de venda ("sob consulta" no site
+  e nada digitado): fica fora do gasto e do lucro até alguém informar a venda.
+- Valores até R$ 20.000.000,00. Se um carro vendido reaparecer no site, o valor de venda
+  digitado é apagado (valor pago e despesas ficam).
+- **Gasto do mês** = valor pago + despesas dos carros vendidos naquele mês.
+  **Investido em estoque** = valor pago + despesas dos carros ainda à venda.
+- **Marcas**: ranking das marcas mais vendidas no mês (quantidade; desempate por
+  faturamento). A marca vem do nome do anúncio (`cars.brand`).
+- Banco: colunas `cars.brand`, `cars.cost_cents`, `cars.sale_price_cents` e tabela
+  `car_expenses`, criadas pela migração automática (SQLite e Postgres).
+
 ## Modo demo
 
 Para mostrar o painel com exemplos (chamados, queda de preço, vendido):
@@ -99,8 +126,8 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
     Bearer errado → `401`; `CRON_SECRET` ausente → `503`.
 - **Login com dois perfis** (mesma tela; a senha decide o perfil):
   - **admin** (`APP_PASSWORD`, social media): acesso total.
-  - **equipe** (`STAFF_PASSWORD`, funcionários): só o **Painel da Equipe** (`/equipe`, somente
-    leitura: dias em estoque e sugestões de redução de preço). Sem `STAFF_PASSWORD`, o perfil
+  - **equipe** (`STAFF_PASSWORD`, funcionários): só o **Painel da Equipe** (`/equipe` e `/equipe/*`:
+    dias em estoque, sugestões de redução de preço, vendas e financeiro dos carros). Sem `STAFF_PASSWORD`, o perfil
     equipe fica desativado. Trocar a senha derruba as sessões da equipe.
   - Na Vercel sem `APP_PASSWORD` o app responde 503. Local sem senhas → tudo aberto (admin).
 - **Arquivos:** só `/tmp` é gravável (cache de fotos). O detalhe do anúncio fica em cache

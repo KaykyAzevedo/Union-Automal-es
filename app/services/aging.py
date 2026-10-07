@@ -70,9 +70,12 @@ def team_view(conn, today: date | None = None) -> dict:
     """Contexto de GET /equipe: {summary, cars}."""
     today = today or db.now().date()
     rows = conn.execute(
-        """SELECT id, name, photo_url, price_cents, posted, first_seen, in_baseline, listed_at
+        """SELECT id, name, photo_url, price_cents, posted, first_seen, in_baseline, listed_at, cost_cents
            FROM cars WHERE active = 1"""
     ).fetchall()
+    expenses = {r["car_id"]: r["total"] for r in conn.execute(
+        """SELECT e.car_id, SUM(e.amount_cents) AS total FROM car_expenses e
+           JOIN cars c ON c.id = e.car_id WHERE c.active = 1 GROUP BY e.car_id""")}
 
     history: dict[int, list[tuple[date, int | None]]] = {}
     for h in conn.execute(
@@ -100,6 +103,8 @@ def team_view(conn, today: date | None = None) -> dict:
             "last_price_change": reduced,
             "days_since_price_change": clock,
             "suggestion": suggest(r["price_cents"], clock),
+            "cost_cents": r["cost_cents"],
+            "expenses_cents": int(expenses.get(r["id"], 0) or 0),
         })
     cars.sort(key=lambda c: (-c["days_in_stock"], c["id"]))
 

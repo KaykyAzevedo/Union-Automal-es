@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/_macros.html" import price, photo %}
+{% from "partials/_macros.html" import price, photo, money %}
 {% block title %}Equipe{% endblock %}
 {% block body_class %}page-equipe{% endblock %}
 
@@ -11,6 +11,8 @@
 
 {% block content %}
 {% set s = summary %}
+{% set team_tab = 'estoque' %}
+{% include "partials/team_tabs.html" %}
 <section class="page-head">
   <div>
     <h1>Estoque da loja</h1>
@@ -86,6 +88,17 @@
       <p class="muted small">Último ajuste de preço há {{ days_word(car.days_since_price_change) }}</p>
       {% endif %}
 
+      {# custo e despesas (F13): só aparecem quando alguém já informou #}
+      {% set cost = car.cost_cents if car.cost_cents is defined else none %}
+      {% set exp = car.expenses_cents if car.expenses_cents is defined and car.expenses_cents else 0 %}
+      {% if cost is not none or exp %}
+      <p class="team-cost">
+        {% if cost is not none %}<span>Custo <strong>{{ money(cost) }}</strong></span>{% endif %}
+        {% if exp %}<span>Despesas <strong>{{ money(exp) }}</strong></span>{% endif %}
+        {% if cost is not none and exp %}<span>Investido <strong>{{ money(cost + exp) }}</strong></span>{% endif %}
+      </p>
+      {% endif %}
+
       {% if car.suggestion %}
       {% set sg = car.suggestion %}
       <div class="suggestion">
@@ -93,6 +106,10 @@
         {% if sg.reason %}<p class="suggestion-reason">{{ sg.reason }}</p>{% endif %}
       </div>
       {% endif %}
+
+      <a class="btn btn-ghost btn-sm team-cost-link" href="/equipe/carro/{{ car.id }}">
+        {{ 'Custos ›' if cost is not none or exp else '+ Informar custos' }}
+      </a>
     </div>
   </li>
   {% endfor %}

@@ -10,8 +10,8 @@ DEMO_PREFIX = "demo-"
 def track_missing(conn: sqlite3.Connection, seen_ids: set[int], ts: str) -> list[int]:
     """Atualiza missing_count após uma coleta bem-sucedida e não vazia.
 
-    Presentes: zera contagem; se estavam vendidos, reativa e descarta o
-    sold_alert aberto. Ativos ausentes: +1; ao chegar em SOLD_AFTER_MISSES viram
+    Presentes: zera contagem; se estavam vendidos, reativa, descarta o
+    sold_alert aberto e limpa sale_price_cents (F13). Ativos ausentes: +1; ao chegar em SOLD_AFTER_MISSES viram
     vendidos (active=0, sold_at, sold_alert, chamado pendente → 'cancelled').
     Carros demo ficam de fora. Não faz commit. Retorna ids vendidos agora.
     """
@@ -22,6 +22,8 @@ def track_missing(conn: sqlite3.Connection, seen_ids: set[int], ts: str) -> list
             WHERE dismissed = 0 AND car_id IN (SELECT id FROM cars WHERE sold_at IS NOT NULL AND id IN ({marks}))""",
         seen,
     )
+    # reapareceu: o valor de venda digitado era da "venda" desfeita (custo e despesas ficam)
+    conn.execute(f"UPDATE cars SET sale_price_cents = NULL WHERE sold_at IS NOT NULL AND id IN ({marks})", seen)
     conn.execute(f"UPDATE cars SET missing_count = 0, sold_at = NULL, active = 1 WHERE id IN ({marks})", seen)
     conn.execute(
         f"""UPDATE cars SET missing_count = missing_count + 1

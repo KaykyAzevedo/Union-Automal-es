@@ -20,3 +20,27 @@
     <div class="{{ cls }} photo-placeholder" aria-hidden="true">🚗</div>
   {%- endif -%}
 {%- endmacro %}
+
+{# Dinheiro sem centavos quando são ",00" (R$ 125.900); negativo com sinal na frente. #}
+{% macro money(cents, none_text='—') -%}
+  {%- if cents is none or cents is undefined -%}{{ none_text }}
+  {%- elif cents < 0 -%}−{{ ((-cents) | brl) | replace(',00', '') }}
+  {%- else -%}{{ (cents | brl) | replace(',00', '') }}
+  {%- endif -%}
+{%- endmacro %}
+
+{# Valor para preencher campo de formulário em reais: 4500000 → 45.000 · 4500050 → 45.000,50 #}
+{% macro input_money(cents) -%}
+  {%- if cents is not none and cents is defined -%}
+    {{- '{:,}'.format(cents // 100) | replace(',', '.') -}}{%- if cents % 100 %},{{ '%02d' | format(cents % 100) }}{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{# Valor compacto para eixo de gráfico: 45.000.000 centavos → 450 mil · 1,2 mi #}
+{% macro compact(cents) -%}
+  {%- set r = (cents | abs) / 100 -%}
+  {%- if r >= 1000000 -%}{{ ('%.1f' | format(r / 1000000)) | replace('.', ',') | replace(',0', '') }} mi
+  {%- elif r >= 1000 -%}{{ (r / 1000) | round | int }} mil
+  {%- else -%}{{ r | round | int }}
+  {%- endif -%}
+{%- endmacro %}

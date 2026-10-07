@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import photo, money, compact %}
+{% block title %}Vendas{% endblock %}
+{% block body_class %}page-equipe page-vendas{% endblock %}
+
+{% block content %}
+{% set s = summary %}
+{% set team_tab = 'vendas' %}
+{% include "partials/team_tabs.html" %}
+
+{# ---------- navegação de mês ---------- #}
+<nav class="month-nav" aria-label="Mês">
+  <a class="month-arrow" href="/equipe/vendas?mes={{ month.prev }}" aria-label="Mês anterior" rel="prev">◀</a>
+  <h1 class="month-label">{{ month.label }}</h1>
+  {% if month.next %}
+  <a class="month-arrow" href="/equipe/vendas?mes={{ month.next }}" aria-label="Próximo mês" rel="next">▶</a>
+  {% else %}
+  <span class="month-arrow is-disabled" aria-hidden="true">▶</span>
+  {% endif %}
+</nav>
+
+{# ---------- cartões do mês ---------- #}
+{% set spend = (s.cost_cents or 0) + (s.expenses_cents or 0) %}
+{% set neg = s.profit_cents is not none and s.profit_cents < 0 %}
+<section class="fin-stats" aria-label="Resumo do mês">
+  <div class="fstat">
+    <span class="fstat-label">Faturamento</span>
+    <span class="fstat-value">{{ money(s.revenue_cents) }}</span>
+    <span class="fstat-sub">soma das vendas do mês</span>
+  </div>
+  <div class="fstat">
+    <span class="fstat-label">Gasto</span>
+    <span class="fstat-value">{{ money(spend) }}</span>
+    <span class="fstat-sub">compra {{ money(s.cost_cents or 0) }} + despesas {{ money(s.expenses_cents or 0) }}</span>
+  </div>
+  <div class="fstat fstat-profit {{ 'is-neg' if neg }}">
+    <span class="fstat-label">Lucro</span>
+    <span class="fstat-value">{{ money(s.profit_cents) }}</span>
+    <span class="fstat-sub">
+      {% if s.margin_pct is not none %}margem {{ ('%.1f' | format(s.margin_pct)) | replace('.', ',') }}%{% else %}margem —{% endif %}
+      {% if neg %} · ▼ prejuízo{% endif %}
+    </span>
+  </div>
+  <div class="fstat">
+    <span class="fstat-label">Vendidos</span>
+    <span class="fstat-value">{{ s.sold_count }}</span>
+    <span class="fstat-sub">{% if s.avg_days_to_sell is not none %}média de {{ s.avg_days_to_sell }} dia{{ 's' if s.avg_days_to_sell != 1 }} para vender{% else %}carro{{ 's' if s.sold_count != 1 }} no mês{% endif %}</span>
+  </div>
+</section>
+
+{% if s.missing_cost and s.missing_cost > 0 %}
+<div class="fin-warn" role="status">
+  <span>⚠ <strong>{{ s.missing_cost }} carro{{ 's' if s.missing_cost != 1 }} sem valor de compra</strong> — o lucro não {{ 'os' if s.missing_cost != 1 else 'o' }} inclui.</span>
+  <a href="#vendas-lista">Informar agora ↓</a>
+</div>
+{% endif %}
+{# vendidos sem valor de venda (sob consulta no site e nada digitado): ficam fora de custo/despesas/lucro do mês #}
+{% set miss_sale = s.missing_sale if s.missing_sale is defined and s.missing_sale else 0 %}
+{% if miss_sale > 0 %}
+<div class="fin-warn" role="status">
+  <span>⚠ <strong>{{ miss_sale }} carro{{ 's' if miss_sale != 1 }} sem valor de venda</strong> — {{ 'ficam' if miss_sale != 1 else 'fica' }} fora do faturamento e do lucro.</span>
+  <a href="#vendas-lista">Informar agora ↓</a>
+</div>
+{% endif %}
+
+{% if sales %}
+{# ---------- marca que mais vendeu + ranking ---------- #}
+{% if brands %}
+{% set top = brands[0] %}
+<section class="card panel brand-panel">
+  <div class="top-brand">
+    <span class="top-brand-icon" aria-hidden="true">🏆</span>
+    <div>
+      <p class="top-brand-label">Marca que mais vendeu</p>
+      <p class="top-brand-name">{{ top.brand or 'Sem marca' }}</p>
+      <p class="muted small">{{ top.count }} carro{{ 's' if top.count != 1 }} · {{ money(top.revenue_cents) }}{% if top.share_pct is not none %} · {{ top.share_pct | round | int }}% das vendas{% endif %}</p>
+    </div>
+  </div>
+
+  <h2 class="section-title">Vendas por marca</h2>
+  {% set maxc = brands | map(attribute='count') | max %}
+  <ol class="brand-bars">
+    {% for b in brands %}
+    <li title="{{ b.brand or 'Sem marca' }}: {{ b.count }} carro{{ 's' if b.count != 1 }} · {{ money(b.revenue_cents) }}">
+      <span class="bb-name">{{ b.brand or 'Sem marca' }}</span>
+      <span class="bb-track"><span class="bb-fill" style="width: {{ (b.count * 100 / maxc) | round(1) if maxc else 0 }}%"></span></span>
+      <span class="bb-value">{{ b.count }}</span>
+      <span class="bb-rev muted small">{{ money(b.revenue_cents) }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+{% endif %}
+
+{# ---------- últimos 6 meses: faturamento × gasto × lucro (SVG inline, sem biblioteca) ---------- #}
+{% if history %}
+{% set ns = namespace(vmax=1, vmin=0) %}
+{% for h in history %}
+  {% for v in [h.revenue_cents or 0, h.spend_cents or 0, h.profit_cents or 0] %}
+    {% if v > ns.vmax %}{% set ns.vmax = v %}{% endif %}
+    {% if v < ns.vmin %}{% set ns.vmin = v %}{% endif %}
+  {% endfor %}
+{% endfor %}
+{# desenhado na escala do celular (360 de largura) para o texto ficar legível sem zoom #}
+{% set W = 360 %}{% set top_y = 20 %}{% set plot_h = 150 %}
+{% set rng = ns.vmax - ns.vmin %}
+{% set y0 = top_y + ns.vmax * plot_h / rng %}
+{% set n = history | length %}
+{% set gw = (W - 16) / n %}
+{% set bw = [16, gw * 0.26] | min %}
+<section class="card panel viz-root">
+  <h2 class="section-title">Últimos {{ n }} meses</h2>
+  <ul class="viz-legend" aria-hidden="true">
+    <li><i class="sw sw-1"></i>Faturamento</li>
+    <li><i class="sw sw-2"></i>Gasto</li>
+    <li><i class="sw sw-3"></i>Lucro</li>
+  </ul>
+  <svg class="viz-chart" viewBox="0 0 {{ W }} {{ top_y + plot_h + 34 }}" role="img"
+       aria-label="Faturamento, gasto e lucro por mês nos últimos {{ n }} meses. Os números estão na tabela abaixo.">
+    {# grade: topo (máximo) e linha do zero #}
+    <line class="viz-grid" x1="8" x2="{{ W - 8 }}" y1="{{ top_y }}" y2="{{ top_y }}"/>
+    <text class="viz-axis" x="8" y="{{ top_y - 5 }}">R$ {{ compact(ns.vmax) }}</text>
+    {% for h in history %}
+      {% set cx = 8 + gw * loop.index0 + gw / 2 %}
+      {% set is_cur = h.key == month.key %}
+      {% if is_cur %}<rect class="viz-current" x="{{ (cx - gw / 2 + 2) | round(1) }}" y="{{ top_y - 2 }}" width="{{ (gw - 4) | round(1) }}" height="{{ plot_h + 30 }}" rx="5"/>{% endif %}
+      {% for v, cls, nome in [(h.revenue_cents or 0, 's1', 'Faturamento'), (h.spend_cents or 0, 's2', 'Gasto'), (h.profit_cents or 0, 's3', 'Lucro')] %}
+        {% set bh = (v | abs) * plot_h / rng %}
+        {% set x = cx - (bw * 3 + 4) / 2 + loop.index0 * (bw + 2) %}
+        <rect class="viz-bar {{ cls }}" x="{{ x | round(1) }}" y="{{ (y0 - bh if v >= 0 else y0) | round(1) }}"
+              width="{{ bw | round(1) }}" height="{{ [bh, 1.5] | max | round(1) }}" rx="3">
+          <title>{{ h.label }} · {{ nome }}: {{ money(v) }}</title>
+        </rect>
+      {% endfor %}
+      <a href="/equipe/vendas?mes={{ h.key }}">
+        <text class="viz-month {{ 'is-current' if is_cur }}" x="{{ cx | round(1) }}" y="{{ top_y + plot_h + 20 }}" text-anchor="middle">{{ h.label }}</text>
+      </a>
+    {% endfor %}
+    <line class="viz-zero" x1="8" x2="{{ W - 8 }}" y1="{{ y0 | round(1) }}" y2="{{ y0 | round(1) }}"/>
+  </svg>
+
+  <details class="viz-table">
+    <summary>Ver os números</summary>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Mês</th><th>Vendidos</th><th>Faturamento</th><th>Gasto</th><th>Lucro</th></tr></thead>
+        <tbody>
+          {% for h in history | reverse %}
+          <tr class="{{ 'is-current' if h.key == month.key }}">
+            <th scope="row"><a href="/equipe/vendas?mes={{ h.key }}">{{ h.label }}</a></th>
+            <td>{{ h.sold_count }}</td>
+            <td>{{ money(h.revenue_cents or 0) }}</td>
+            <td>{{ money(h.spend_cents or 0) }}</td>
+            <td class="{{ 'neg' if (h.profit_cents or 0) < 0 }}">{{ money(h.profit_cents or 0) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+{% endif %}
+
+{# ---------- vendas do mês ---------- #}
+<section class="section" id="vendas-lista">
+  <h2 class="section-title">Vendas de {{ month.label }} <span class="pill">{{ sales | length }}</span></h2>
+  {% if sales %}
+  <ul class="sale-list">
+    {% for v in sales %}
+    {% set lneg = v.profit_cents is not none and v.profit_cents < 0 %}
+    <li class="card sale-card {{ 'no-cost' if v.cost_cents is none or v.sale_cents is none }}">
+      <a class="sale-photo" href="/equipe/carro/{{ v.car.id }}" tabindex="-1" aria-hidden="true">{{ photo(v.car, 'sale-img') }}</a>
+      <div class="sale-body">
+        <h3 class="sale-name"><a href="/equipe/carro/{{ v.car.id }}">{{ v.car.name }}</a></h3>
+        <p class="muted small">
+          {% if v.car.brand %}{{ v.car.brand }} · {% endif %}vendido em {{ v.sold_at.strftime('%d/%m') if v.sold_at and v.sold_at is not string else (v.sold_at or '—') }}
+          {% if v.days_to_sell is not none %} · {{ v.days_to_sell }} dia{{ 's' if v.days_to_sell != 1 }} em estoque{% endif %}
+        </p>
+        <dl class="sale-nums">
+          <div>
+            <dt>Venda</dt>
+            <dd>{% if v.sale_cents is none %}<a class="need-cost" href="/equipe/carro/{{ v.car.id }}">informar venda</a>{% else %}{{ money(v.sale_cents) }}{% endif %}{% if v.sale_cents is not none and v.sale_is_estimate %} <span class="est-tag" title="Valor real da venda não informado: usando o último preço do site">preço do site</span>{% endif %}</dd>
+          </div>
+          <div>
+            <dt>Custo</dt>
+            <dd>{% if v.cost_cents is none %}<a class="need-cost" href="/equipe/carro/{{ v.car.id }}">informar custo</a>{% else %}{{ money(v.cost_cents) }}{% endif %}</dd>
+          </div>
+          <div>
+            <dt>Despesas</dt>
+            <dd>{{ money(v.expenses_cents or 0) }}</dd>
+          </div>
+          <div class="sale-profit {{ 'is-neg' if lneg }}">
+            <dt>Lucro</dt>
+            <dd>{% if v.profit_cents is none %}<span class="muted">—</span>{% else %}{{ money(v.profit_cents) }}{% endif %}</dd>
+          </div>
+        </dl>
+      </div>
+      <a class="btn btn-ghost btn-sm sale-edit" href="/equipe/carro/{{ v.car.id }}">Custos ›</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">💤</div>
+    <p><strong>Nenhuma venda em {{ month.label }}.</strong></p>
+    <p class="muted">Um carro entra aqui quando sai do site por 2 verificações seguidas.</p>
+  </div>
+  {% endif %}
+</section>
+
+{# ---------- estoque (dinheiro parado) ---------- #}
+{% if s.in_stock is not none and s.invested_cents is not none %}
+<p class="fin-foot muted small">
+  Em estoque hoje: <strong>{{ s.in_stock }}</strong> carro{{ 's' if s.in_stock != 1 }} · investido (compra + despesas informadas): <strong>{{ money(s.invested_cents) }}</strong>.
+  <a href="/equipe">Ver estoque ›</a>
+</p>
+{% endif %}
+{% endblock %}

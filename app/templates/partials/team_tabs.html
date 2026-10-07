@@ -1,0 +1,5 @@
+{# Abas da área da equipe. Uso: {% set team_tab = 'estoque' | 'vendas' %}{% include "partials/team_tabs.html" %} #}
+<nav class="team-tabs" aria-label="Área da equipe">
+  <a href="/equipe" class="{{ 'active' if team_tab == 'estoque' }}" {% if team_tab == 'estoque' %}aria-current="page"{% endif %}>🚗 Estoque</a>
+  <a href="/equipe/vendas" class="{{ 'active' if team_tab == 'vendas' }}" {% if team_tab == 'vendas' %}aria-current="page"{% endif %}>💰 Vendas</a>
+</nav>
