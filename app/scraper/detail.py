@@ -14,9 +14,14 @@ import httpx
 from bs4 import BeautifulSoup
 
 from ._http import ScraperError, fetch, new_client
-from .brands import KNOWN_MULTIWORD_BRANDS, brand_display, split_brand  # noqa: F401  (reexportados)
 from .listed_at import fetch_listed_at
 from .parser import BASE_URL, PLACEHOLDER_PHOTO_MARKERS, parse_price_cents
+
+# Marcas com mais de uma palavra, para quando o slug não resolver a separação.
+KNOWN_MULTIWORD_BRANDS = ("LAND ROVER", "MERCEDES-BENZ", "ALFA ROMEO", "ASTON MARTIN", "ROLLS-ROYCE")
+# Siglas que ficam em caixa alta ("BMW", não "Bmw").
+_BRAND_ACRONYMS = {"BMW", "BYD", "GWM", "JAC", "RAM", "MG", "KIA", "DS", "GM", "VW", "JMC", "CAOA"}
+_BRAND_SPECIAL = {"KIA": "Kia", "RAM": "RAM", "CAOA": "Caoa"}
 
 _DETAIL_PATH_RE = re.compile(r"/Veiculo/([^/]+)/(\d+)/detalhes", re.IGNORECASE)
 _YEAR_SUFFIX_RE = re.compile(r"\s+(19|20)\d{2}$")
@@ -63,6 +68,21 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9.]+", "-", text.lower()).strip("-")
 
 
+def brand_display(raw: str) -> str:
+    """"CHEVROLET" -> "Chevrolet", "LAND ROVER" -> "Land Rover", "BMW" -> "BMW"."""
+    def word(w: str) -> str:
+        if "-" in w:
+            return "-".join(word(p) for p in w.split("-"))
+        up = w.upper()
+        if up in _BRAND_SPECIAL:
+            return _BRAND_SPECIAL[up]
+        if up in _BRAND_ACRONYMS:
+            return up
+        return w.capitalize()
+
+    return " ".join(word(w) for w in raw.split())
+
+
 def split_brand_model(title: str, slug: str | None) -> tuple[str, str]:
     """Separa "LAND ROVER RANGE ROVER SPORT" em ("LAND ROVER", "RANGE ROVER SPORT").
 
@@ -79,7 +99,12 @@ def split_brand_model(title: str, slug: str | None) -> tuple[str, str]:
             model_slug = _slugify(" ".join(words[i:]))
             if model_slug and (slug == model_slug or slug.startswith(model_slug + "-")):
                 return " ".join(words[:i]), " ".join(words[i:])
-    return split_brand(title)
+    upper = title.upper()
+    for brand in KNOWN_MULTIWORD_BRANDS:
+        if upper.startswith(brand + " "):
+            n = len(brand.split())
+            return " ".join(words[:n]), " ".join(words[n:])
+    return words[0], " ".join(words[1:])
 
 
 def _parse_int(text: str | None) -> int | None:

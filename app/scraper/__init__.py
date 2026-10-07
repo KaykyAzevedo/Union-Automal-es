@@ -7,7 +7,6 @@ from __future__ import annotations
 import httpx
 
 from ._http import ScraperError, fetch, log, new_client
-from .brands import brand_from_name
 from .listed_at import fetch_listed_at, fill_listed_at
 from .parser import (
     BASE_URL,
@@ -23,7 +22,6 @@ __all__ = [
     "LISTING_URL",
     "ScrapedCar",
     "ScraperError",
-    "brand_from_name",
     "fetch_listed_at",
     "fetch_listing_html",
     "fill_listed_at",

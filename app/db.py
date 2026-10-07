@@ -20,7 +20,7 @@ DEFAULT_DB_PATH = BASE_DIR / "data" / "union.db"
 TZ = ZoneInfo("America/Sao_Paulo")
 log = logging.getLogger(__name__)
 
-TABLES = ["cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "detail_cache"]
+TABLES = ["cars", "price_history", "tickets", "price_alerts", "sold_alerts", "runs", "detail_cache"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cars (
@@ -39,10 +39,7 @@ CREATE TABLE IF NOT EXISTS cars (
     sold_at      TEXT,
     in_baseline  INTEGER NOT NULL DEFAULT 0,  -- entrou no registro inicial (1ª coleta): entrada real desconhecida
     listed_at    TEXT,                         -- data de cadastro no site (Last-Modified da foto), se disponível
-    listed_at_checked TEXT,                    -- última tentativa de obter listed_at (1x por dia)
-    brand        TEXT,                         -- marca em caixa de exibição (app.scraper.brand_from_name)
-    cost_cents   INTEGER,                      -- valor pago na compra (equipe)
-    sale_price_cents INTEGER                   -- valor real da venda; NULL → usa price_cents (estimativa)
+    listed_at_checked TEXT                     -- última tentativa de obter listed_at (1x por dia)
 );
 CREATE INDEX IF NOT EXISTS ix_cars_name_key ON cars(name_key);
 
@@ -78,15 +75,6 @@ CREATE TABLE IF NOT EXISTS sold_alerts (
     created_at   TEXT NOT NULL,
     dismissed    INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE TABLE IF NOT EXISTS car_expenses (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    car_id       INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
-    description  TEXT NOT NULL,
-    amount_cents INTEGER NOT NULL,
-    created_at   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ix_car_expenses_car ON car_expenses(car_id);
 
 CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,9 +157,6 @@ MIGRATIONS = [
     ("cars", "in_baseline", "INTEGER NOT NULL DEFAULT 0"),
     ("cars", "listed_at", "TEXT"),
     ("cars", "listed_at_checked", "TEXT"),
-    ("cars", "brand", "TEXT"),
-    ("cars", "cost_cents", "INTEGER"),
-    ("cars", "sale_price_cents", "INTEGER"),
 ]
 
 
@@ -201,13 +186,6 @@ def migrate(conn) -> None:
              AND external_id NOT LIKE 'demo-%'
              AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.car_id = cars.id)"""
     )
-    # F13: marca dos carros anteriores à coluna (o nome já traz a marca na frente)
-    missing_brand = conn.execute("SELECT id, name FROM cars WHERE brand IS NULL").fetchall()
-    if missing_brand:
-        from .services.finance import brand_of
-
-        for row in missing_brand:
-            conn.execute("UPDATE cars SET brand = ? WHERE id = ?", (brand_of(row["name"]), row["id"]))
     conn.commit()
 
 
