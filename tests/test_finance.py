@@ -92,7 +92,11 @@ def test_brand_filled_on_insert_refresh_and_backfill(stock, car):
 
 def test_schema_has_finance_columns_and_cascade(stock):
     conn = stock
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(cars)")}
+    if db.is_postgres(conn):
+        cols = {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'cars'")}
+    else:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(cars)")}
     assert {"brand", "cost_cents", "sale_price_cents"} <= cols
     assert "car_expenses" in db.TABLES
     _expense(conn, _id(conn, "1"), 1000)

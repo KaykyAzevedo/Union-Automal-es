@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 
 TABLES = ["cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "detail_cache"]
 
+# ATENÇÃO: no Postgres este script é dividido em comandos por app.pgcompat.split_statements
+# (comentários `--` são removidos antes). tests/test_pgcompat_split.py confere cada comando.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cars (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +44,7 @@ CREATE TABLE IF NOT EXISTS cars (
     listed_at_checked TEXT,                    -- última tentativa de obter listed_at (1x por dia)
     brand        TEXT,                         -- marca em caixa de exibição (app.scraper.brand_from_name)
     cost_cents   INTEGER,                      -- valor pago na compra (equipe)
-    sale_price_cents INTEGER                   -- valor real da venda; NULL → usa price_cents (estimativa)
+    sale_price_cents INTEGER                   -- valor real da venda (NULL: usa price_cents, estimativa)
 );
 CREATE INDEX IF NOT EXISTS ix_cars_name_key ON cars(name_key);
 
@@ -175,15 +177,21 @@ MIGRATIONS = [
 ]
 
 
+def _columns(conn, table: str) -> set[str]:
+    if is_postgres(conn):
+        return {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ?", (table,))}
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def migrate(conn) -> None:
     """Adiciona colunas que faltam em bancos antigos. Idempotente, não apaga dados."""
     for table, column, definition in MIGRATIONS:
-        if is_postgres(conn):
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}")
-            continue
-        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-        if column not in existing:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        if column in _columns(conn, table):
+            continue  # no Postgres até o ALTER ... IF NOT EXISTS pede lock exclusivo: só roda se faltar
+        if_missing = "IF NOT EXISTS " if is_postgres(conn) else ""  # outra instância pode ter criado agora
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {if_missing}{column} {definition}")
     # Backfill único para bancos anteriores à F6: o registro inicial são os carros com o
     # menor first_seen (todos inseridos com o mesmo timestamp). Só roda se ninguém tiver a flag.
     conn.execute(

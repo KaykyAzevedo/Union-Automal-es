@@ -5,7 +5,8 @@ cursor.lastrowid). Este wrapper traduz para o psycopg:
 - `?` → `%s` (e `%` literal → `%%`, ex.: LIKE 'demo-%');
 - INSERT em tabela com coluna id ganha `RETURNING id` para preencher lastrowid;
 - linhas aceitam índice e nome (tuple(row) funciona);
-- executescript executa comando a comando.
+- executescript executa comando a comando (split_statements: ignora comentários e
+  só divide em `;` fora de strings).
 """
 from __future__ import annotations
 
@@ -14,8 +15,47 @@ import re
 import psycopg
 
 # tabelas com PK `id` serial (lastrowid via RETURNING id)
-ID_TABLES = {"cars", "price_history", "tickets", "price_alerts", "sold_alerts", "runs"}
+ID_TABLES = {"cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs"}
 _INSERT_RE = re.compile(r"^\s*INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
+
+
+def split_statements(script: str) -> list[str]:
+    """Divide um script SQL em comandos, sem os comentários.
+
+    Remove `-- até o fim da linha` e `/* ... */` e divide em `;`, sempre fora de
+    strings ('...', com '' como aspa escapada) e de identificadores "...". Um `;`
+    dentro de comentário ou de string NÃO divide o comando. Comandos vazios somem.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    i, n = 0, len(script)
+    while i < n:
+        ch = script[i]
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = None  # '' reabre a string no próximo caractere: mesmo efeito
+        elif ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+        elif script.startswith("--", i):
+            end = script.find("\n", i)
+            i = n if end == -1 else end
+            continue  # mantém a quebra de linha
+        elif script.startswith("/*", i):
+            end = script.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            current.append(" ")
+            continue
+        elif ch == ";":
+            statements.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+        i += 1
+    statements.append("".join(current))
+    return [s.strip() for s in statements if s.strip()]
 
 
 def normalize_url(url: str) -> str:
@@ -109,10 +149,8 @@ class PgConnection:
         return PgCursor(cur)
 
     def executescript(self, script: str) -> None:
-        for statement in script.split(";"):
-            if statement.strip() and not all(
-                    line.strip().startswith("--") or not line.strip() for line in statement.splitlines()):
-                self._conn.execute(statement)
+        for statement in split_statements(script):
+            self._conn.execute(statement)
 
     def commit(self) -> None:
         self._conn.commit()

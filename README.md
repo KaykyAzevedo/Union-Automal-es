@@ -35,6 +35,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 Testes: `pip install -r requirements-dev.txt` e depois `pytest`
 
+Antes de publicar, rode nos DOIS bancos (a produção é Postgres): `powershell -ExecutionPolicy Bypass -File tests\run_both.ps1`.
+Ele usa um PostgreSQL 16 portátil em `%LOCALAPPDATA%\union-pg`, porta 55432 (baixa sozinho na 1ª vez; sem Docker, WSL ou administrador).
+
 ## Como funciona
 
 - Banco: `data/union.db` (SQLite, criado sozinho e migrado sozinho em versões novas).
