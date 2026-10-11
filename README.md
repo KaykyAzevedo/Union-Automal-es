@@ -85,9 +85,15 @@ Visível e editável por **admin e equipe** (tudo sob `/equipe/*`). Regras em
   digitado é apagado (valor pago e despesas ficam).
 - **Gasto do mês** = valor pago + despesas dos carros vendidos naquele mês.
   **Investido em estoque** = valor pago + despesas dos carros ainda à venda.
+- **Não foi venda:** "vendido" significa só que o carro sumiu do site. Se a loja tirou o
+  anúncio por outro motivo, a equipe marca **"Não foi venda"** na página do carro
+  (`POST /equipe/carro/{id}/nao-venda`, dá para desfazer). O carro sai do faturamento, do
+  lucro, das marcas, do histórico e dos "vendidos em 30 dias", e aparece em "Retirados do
+  site" no fim da tela de vendas. Valor pago e despesas ficam guardados. Se o carro voltar
+  ao site, a marca é apagada sozinha.
 - **Marcas**: ranking das marcas mais vendidas no mês (quantidade; desempate por
   faturamento). A marca vem do nome do anúncio (`cars.brand`).
-- Banco: colunas `cars.brand`, `cars.cost_cents`, `cars.sale_price_cents` e tabela
+- Banco: colunas `cars.brand`, `cars.cost_cents`, `cars.sale_price_cents`, `cars.not_sale` e tabela
   `car_expenses`, criadas pela migração automática (SQLite e Postgres).
 
 ## Modo demo

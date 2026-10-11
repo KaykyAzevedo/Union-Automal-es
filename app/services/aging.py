@@ -109,7 +109,8 @@ def team_view(conn, today: date | None = None) -> dict:
     cars.sort(key=lambda c: (-c["days_in_stock"], c["id"]))
 
     sold_from = (today - timedelta(days=SOLD_WINDOW_DAYS)).isoformat()
-    sold_30d = sum(1 for (sold_at,) in conn.execute("SELECT sold_at FROM cars WHERE sold_at IS NOT NULL")
+    sold_30d = sum(1 for (sold_at,) in conn.execute(
+                       "SELECT sold_at FROM cars WHERE sold_at IS NOT NULL AND not_sale = 0")
                    if (_date(sold_at) or today).isoformat() >= sold_from)
     days = [c["days_in_stock"] for c in cars]
     summary = {

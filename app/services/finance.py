@@ -14,6 +14,10 @@ Regras (só aqui):
 - Gasto do mês (spend) = custo + despesas dos carros VENDIDOS no mês (regime por carro vendido).
 - Estoque: invested_cents = custo + despesas dos carros ativos.
 - margin_pct = lucro / faturamento dos carros completos (1 casa); None sem base.
+- F14 "não foi venda" (cars.not_sale=1): o carro sumiu do site por outro motivo (anúncio
+  retirado). Sai de tudo que é venda (summary, brands, sales, history, avg_days_to_sell) e
+  aparece só em `removed`. Continua fora do estoque (invested/in_stock). Custo e despesas
+  ficam guardados. Só vale para carro com sold_at; se reaparecer no site, volta a 0 (sold.py).
 """
 from __future__ import annotations
 
@@ -118,24 +122,30 @@ def _sale(row, expenses: int) -> dict:
             "expenses_cents": expenses, "profit_cents": profit}
 
 
-def _sales(conn) -> list[dict]:
-    """Todas as vendas (não demo), mais recentes primeiro."""
+def _sales(conn) -> tuple[list[dict], list[dict]]:
+    """(vendas, retirados): carros que saíram do site (não demo), mais recentes primeiro.
+    Retirados = marcados como "não foi venda" (not_sale=1): só {car, sold_at}."""
     expenses = _expenses_by_car(conn)
-    sales = []
+    sales, removed = [], []
     for r in conn.execute(
             f"""SELECT id, name, photo_url, brand, price_cents, cost_cents, sale_price_cents, sold_at,
-                       first_seen, listed_at
+                       first_seen, listed_at, not_sale
                 FROM cars WHERE sold_at IS NOT NULL AND {_NOT_DEMO}"""):
         sold_at = _local(r["sold_at"])
+        car = {"id": r["id"], "name": r["name"], "photo_url": r["photo_url"],
+               "brand": r["brand"] or brand_of(r["name"])}
+        if r["not_sale"]:
+            removed.append({"car": car, "sold_at": sold_at})
+            continue
         sales.append({
-            "car": {"id": r["id"], "name": r["name"], "photo_url": r["photo_url"],
-                    "brand": r["brand"] or brand_of(r["name"])},
+            "car": car,
             "sold_at": sold_at,
             **_sale(r, expenses.get(r["id"], 0)),
             "days_to_sell": max(0, (sold_at.date() - _since(r)).days),
         })
-    sales.sort(key=lambda s: (s["sold_at"], s["car"]["id"]), reverse=True)
-    return sales
+    for rows in (sales, removed):
+        rows.sort(key=lambda s: (s["sold_at"], s["car"]["id"]), reverse=True)
+    return sales, removed
 
 
 def _in_month(sales: list[dict], year: int, month: int) -> list[dict]:
@@ -170,10 +180,10 @@ def _brands(sales: list[dict]) -> list[dict]:
 
 
 def sales_view(conn, mes: str | None = None, today: date | None = None) -> dict:
-    """Contexto de GET /equipe/vendas: {month, summary, brands, sales, history}."""
+    """Contexto de GET /equipe/vendas: {month, summary, brands, sales, history, removed}."""
     today = today or db.now().date()
     year, month = parse_month(mes, today)
-    all_sales = _sales(conn)
+    all_sales, all_removed = _sales(conn)
     sales = _in_month(all_sales, year, month)
     totals = _totals(sales)
     costed_revenue = totals.pop("costed_revenue_cents")
@@ -197,7 +207,7 @@ def sales_view(conn, mes: str | None = None, today: date | None = None) -> dict:
                         "revenue_cents": t["revenue_cents"], "spend_cents": t["cost_cents"] + t["expenses_cents"],
                         "profit_cents": t["profit_cents"]})
     return {"month": month_info(year, month, today), "summary": summary, "brands": _brands(sales),
-            "sales": sales, "history": history}
+            "sales": sales, "history": history, "removed": _in_month(all_removed, year, month)}
 
 
 def car_view(conn, car_id: int) -> dict | None:
@@ -205,7 +215,8 @@ def car_view(conn, car_id: int) -> dict | None:
     if not valid_id(car_id):
         return None
     r = conn.execute(
-        """SELECT id, name, photo_url, brand, price_cents, active, sold_at, cost_cents, sale_price_cents
+        """SELECT id, name, photo_url, brand, price_cents, active, sold_at, cost_cents, sale_price_cents,
+                  not_sale
            FROM cars WHERE id = ?""", (car_id,)).fetchone()
     if r is None:
         return None
@@ -220,7 +231,8 @@ def car_view(conn, car_id: int) -> dict | None:
         "car": {"id": r["id"], "name": r["name"], "photo_url": r["photo_url"],
                 "brand": r["brand"] or brand_of(r["name"]), "price_cents": r["price_cents"],
                 "active": bool(r["active"]), "sold": sold_at is not None, "sold_at": sold_at,
-                "cost_cents": r["cost_cents"], "sale_price_cents": r["sale_price_cents"]},
+                "cost_cents": r["cost_cents"], "sale_price_cents": r["sale_price_cents"],
+                "not_sale": bool(r["not_sale"])},
         "expenses": expenses,
         "totals": {k: numbers[k] for k in ("expenses_cents", "sale_cents", "sale_is_estimate", "profit_cents")},
     }
@@ -253,6 +265,16 @@ def set_cost(conn, car_id: int, text: str | None) -> bool:
 def set_sale_price(conn, car_id: int, text: str | None) -> bool:
     """Valor real da venda. Vazio = voltar ao último preço do site."""
     return _set_amount(conn, car_id, "sale_price_cents", text, allow_zero=False)
+
+
+def set_not_sale(conn, car_id: int, value: str | None) -> bool:
+    """'1' = não foi venda (anúncio retirado); '0' = desfaz. Só para carro que saiu do site
+    (sold_at preenchido); carro ativo ou valor diferente de '0'/'1' → False, nada gravado."""
+    if value not in ("0", "1"):
+        return False
+    cur = conn.execute("UPDATE cars SET not_sale = ? WHERE id = ? AND sold_at IS NOT NULL", (int(value), car_id))
+    conn.commit()
+    return cur.rowcount == 1
 
 
 def add_expense(conn, car_id: int, description: str | None, amount: str | None) -> bool:

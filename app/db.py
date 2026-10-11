@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS cars (
     listed_at_checked TEXT,                    -- última tentativa de obter listed_at (1x por dia)
     brand        TEXT,                         -- marca em caixa de exibição (app.scraper.brand_from_name)
     cost_cents   INTEGER,                      -- valor pago na compra (equipe)
-    sale_price_cents INTEGER                   -- valor real da venda (NULL: usa price_cents, estimativa)
+    sale_price_cents INTEGER,                  -- valor real da venda (NULL: usa price_cents, estimativa)
+    not_sale     INTEGER NOT NULL DEFAULT 0    -- 1 = sumiu do site mas NAO foi venda (anuncio retirado)
 );
 CREATE INDEX IF NOT EXISTS ix_cars_name_key ON cars(name_key);
 
@@ -174,6 +175,7 @@ MIGRATIONS = [
     ("cars", "brand", "TEXT"),
     ("cars", "cost_cents", "INTEGER"),
     ("cars", "sale_price_cents", "INTEGER"),
+    ("cars", "not_sale", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

@@ -9,6 +9,9 @@
 {% set base = '/equipe/carro/' ~ car.id %}
 {% set t = totals %}
 {% set neg = t.profit_cents is not none and t.profit_cents < 0 %}
+{# F14: "não foi venda" (anúncio retirado). Tolerante: se o backend ainda não manda a chave, vale falso. #}
+{% set not_sale = true if (car.not_sale is defined and car.not_sale) else false %}
+{% set counts_as_sale = car.sold and not not_sale %}
 
 <a class="back-link" href="{{ '/equipe/vendas' if car.sold else '/equipe' }}">‹ Voltar para {{ 'Vendas' if car.sold else 'Estoque' }}</a>
 
@@ -19,6 +22,18 @@
 <div class="flash flash-error" role="alert"><span>⚠ Valor inválido — nada foi gravado. Use só números, por exemplo <strong>45000</strong> ou <strong>45.000,50</strong> (máximo R$ 20.000.000).</span></div>
 {% endif %}
 
+{# ---------- F14: este carro não conta como venda ---------- #}
+{% if car.sold and not_sale %}
+<section class="notsale-box" role="status">
+  <p class="notsale-title">🚫 Este carro não conta como venda</p>
+  <p class="notsale-text">O anúncio saiu do site, mas alguém marcou que <strong>não foi venda</strong>. Por isso ele fica fora do faturamento, do lucro e da marca que mais vendeu. O valor pago e as despesas continuam guardados aqui.</p>
+  <form method="post" action="{{ base }}/nao-venda" data-loading-text="Salvando…">
+    <input type="hidden" name="value" value="0">
+    <button type="submit" class="btn btn-accent btn-block">Foi venda sim (desfazer)</button>
+  </form>
+</section>
+{% endif %}
+
 {# ---------- carro ---------- #}
 <section class="card fin-car">
   {{ photo(car, 'fin-img') }}
@@ -26,7 +41,9 @@
     {% if car.brand %}<p class="fin-brand">{{ car.brand }}</p>{% endif %}
     <h1 class="fin-name">{{ car.name }}</h1>
     <p class="fin-status">
-      {% if car.sold %}
+      {% if car.sold and not_sale %}
+        <span class="pill pill-muted">Anúncio retirado{% if car.sold_at %} em {{ car.sold_at.strftime('%d/%m/%Y') if car.sold_at is not string else car.sold_at }}{% endif %}</span>
+      {% elif car.sold %}
         <span class="pill pill-sold">Vendido{% if car.sold_at %} em {{ car.sold_at.strftime('%d/%m/%Y') if car.sold_at is not string else car.sold_at }}{% endif %}</span>
       {% elif car.active %}
         <span class="pill pill-ok">Em estoque</span>
@@ -39,12 +56,14 @@
 </section>
 
 {# ---------- resumo ---------- #}
-<section class="fin-totals" aria-label="Resumo do carro">
+<section class="fin-totals {{ 'is-notsale' if not_sale }}" aria-label="Resumo do carro">
+  {% if not not_sale %}
   <div class="ftot">
     <span class="ftot-label">{{ 'Venda' if car.sold else 'Preço' }}</span>
     <span class="ftot-value">{{ money(t.sale_cents, 'não informado') }}</span>
     {% if car.sold and t.sale_cents is not none and t.sale_is_estimate %}<span class="est-tag">preço do site</span>{% endif %}
   </div>
+  {% endif %}
   <div class="ftot">
     <span class="ftot-label">Custo</span>
     <span class="ftot-value">{{ money(car.cost_cents, 'não informado') }}</span>
@@ -53,11 +72,13 @@
     <span class="ftot-label">Despesas</span>
     <span class="ftot-value">{{ money(t.expenses_cents or 0) }}</span>
   </div>
+  {% if not not_sale %}
   <div class="ftot ftot-profit {{ 'is-neg' if neg }}">
     <span class="ftot-label">{{ 'Lucro' if car.sold else 'Lucro previsto' }}</span>
     <span class="ftot-value">{{ money(t.profit_cents) }}</span>
     {% if t.profit_cents is none %}<span class="muted small">informe {{ 'a venda' if t.sale_cents is none and car.cost_cents is not none else ('o custo e a venda' if t.sale_cents is none else 'o custo') }}</span>{% elif neg %}<span class="small">▼ prejuízo</span>{% endif %}
   </div>
+  {% endif %}
 </section>
 
 {# ---------- valor pago ---------- #}
@@ -76,8 +97,8 @@
   </form>
 </section>
 
-{# ---------- valor real da venda (só para carro vendido) ---------- #}
-{% if car.sold %}
+{# ---------- valor real da venda (só para carro vendido que conta como venda) ---------- #}
+{% if counts_as_sale %}
 <section class="card panel fin-form-card">
   <h2 class="section-title">Valor real da venda</h2>
   <form method="post" action="{{ base }}/venda" class="fin-form" data-loading-text="Salvando…">
@@ -137,8 +158,21 @@
   </form>
 </section>
 
+{# ---------- F14: marcar que não foi venda (discreto, no fim da página) ---------- #}
+{% if counts_as_sale %}
+<section class="notsale-ask">
+  <p class="notsale-ask-title">Este carro não foi vendido?</p>
+  <p class="muted small">Se o anúncio só foi tirado do site (devolução, troca, uso da loja…), marque aqui. Ele deixa de contar no faturamento, no lucro e na marca que mais vendeu. Dá para desfazer depois.</p>
+  <form method="post" action="{{ base }}/nao-venda" data-loading-text="Salvando…"
+        data-confirm="Marcar que este carro NÃO foi vendido?&#10;&#10;Ele sai do faturamento, do lucro e da marca que mais vendeu. Os custos lançados continuam guardados e dá para desfazer depois.">
+    <input type="hidden" name="value" value="1">
+    <button type="submit" class="btn btn-outline btn-block">Não foi venda — anúncio retirado</button>
+  </form>
+</section>
+{% endif %}
+
 <script>
-  // confirmação antes de excluir despesa
+  // confirmação antes de excluir despesa ou de marcar "não foi venda"
   document.querySelectorAll('form[data-confirm]').forEach(function (f) {
     f.addEventListener('submit', function (e) {
       if (!window.confirm(f.dataset.confirm)) { e.preventDefault(); e.stopImmediatePropagation(); }

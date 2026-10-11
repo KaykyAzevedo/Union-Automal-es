@@ -225,7 +225,7 @@ def test_car_view_and_writes(stock):
     v = finance.car_view(conn, cid)
     assert v["car"] == {"id": cid, "name": "CHEVROLET TRACKER 1.0 TURBO LTZ 2026", "photo_url": v["car"]["photo_url"],
                         "brand": "Chevrolet", "price_cents": 12_000_000, "active": True, "sold": False,
-                        "sold_at": None, "cost_cents": None, "sale_price_cents": None}
+                        "sold_at": None, "cost_cents": None, "sale_price_cents": None, "not_sale": False}
     assert v["expenses"] == []
     assert v["totals"] == {"expenses_cents": 0, "sale_cents": 12_000_000, "sale_is_estimate": True,
                            "profit_cents": None}

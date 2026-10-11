@@ -209,6 +209,32 @@
   {% endif %}
 </section>
 
+{# ---------- F14: retirados do site (não contam como venda) — recolhido, só se houver ---------- #}
+{% set removed_list = removed if (removed is defined and removed) else [] %}
+{% if removed_list %}
+<details class="card removed-box" id="retirados">
+  <summary>
+    <span class="removed-title">Retirados do site <span class="muted">(não contam como venda)</span></span>
+    <span class="pill">{{ removed_list | length }}</span>
+  </summary>
+  <p class="muted small removed-help">Saíram do site neste mês, mas alguém marcou que não foi venda. Ficam fora do faturamento, do lucro e do ranking de marcas. Toque no carro para ver ou desfazer.</p>
+  <ul class="removed-list">
+    {% for r in removed_list %}
+    <li>
+      <a href="/equipe/carro/{{ r.car.id }}">
+        {{ photo(r.car, 'removed-img') }}
+        <span class="removed-info">
+          <span class="removed-name">{{ r.car.name }}</span>
+          <span class="muted small">{% if r.car.brand %}{{ r.car.brand }} · {% endif %}saiu do site em {{ r.sold_at.strftime('%d/%m') if r.sold_at and r.sold_at is not string else (r.sold_at or '—') }}</span>
+        </span>
+        <span class="removed-go" aria-hidden="true">›</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
 {# ---------- estoque (dinheiro parado) ---------- #}
 {% if s.in_stock is not none and s.invested_cents is not none %}
 <p class="fin-foot muted small">

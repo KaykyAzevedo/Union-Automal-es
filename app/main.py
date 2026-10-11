@@ -128,6 +128,12 @@ def equipe_carro_venda(car_id: int, sale_price: str = Form(""), conn=Depends(db.
     return _finance_saved(conn, car_id, lambda c, i: finance.set_sale_price(c, i, sale_price))
 
 
+@app.post("/equipe/carro/{car_id}/nao-venda", dependencies=TEAM)
+def equipe_carro_nao_venda(car_id: int, value: str = Form(""), conn=Depends(db.get_conn)):
+    """F14: value='1' marca "não foi venda" (anúncio retirado); '0' desfaz. Só carro que saiu do site."""
+    return _finance_saved(conn, car_id, lambda c, i: finance.set_not_sale(c, i, value))
+
+
 @app.post("/equipe/carro/{car_id}/despesas", dependencies=TEAM)
 def equipe_carro_despesa(car_id: int, description: str = Form(""), amount: str = Form(""),
                          conn=Depends(db.get_conn)):

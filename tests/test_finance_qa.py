@@ -33,6 +33,7 @@ STAFF_ROUTES = {
     ("GET", "/equipe/carro/1"),
     ("POST", "/equipe/carro/1/custo"),
     ("POST", "/equipe/carro/1/venda"),
+    ("POST", "/equipe/carro/1/nao-venda"),   # F14
     ("POST", "/equipe/carro/1/despesas"),
     ("POST", "/equipe/carro/1/despesas/1/excluir"),
 }
@@ -1039,7 +1040,7 @@ def old_db(tmp_path, monkeypatch):
     return path
 
 
-def _dump(conn, skip=("brand", "cost_cents", "sale_price_cents")):
+def _dump(conn, skip=("brand", "cost_cents", "sale_price_cents", "not_sale")):
     out = {}
     for table in ("cars", "price_history", "tickets", "sold_alerts", "runs", "detail_cache"):
         cols = [c for c in _columns(conn, table) if c not in skip]

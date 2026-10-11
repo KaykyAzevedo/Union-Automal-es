@@ -22,7 +22,7 @@ OLD_CARS = [
     ("5000001", "MERCEDES-BENZ C 300 2.0 2021", 30_000_000, 1, None),
     ("demo-1", "FIAT DEMO 2020", 1_000_000, 1, None),
 ]
-NEW_COLS = ("brand", "cost_cents", "sale_price_cents")
+NEW_COLS = ("brand", "cost_cents", "sale_price_cents", "not_sale")
 
 
 # Os helpers de leitura fazem commit: transação aberta com SELECT em `cars` seguraria o lock e o

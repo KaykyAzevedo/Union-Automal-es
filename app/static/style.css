@@ -949,6 +949,50 @@ details[open] > .picker-summary::after { content: "\25B4"; }
   .brand { flex: none; }
 }
 
+/* ---------- F14: "não foi venda" (anúncio retirado) ---------- */
+.notsale-box {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px; margin-bottom: 12px; border-radius: var(--radius);
+  background: var(--sold-soft); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-left: 5px solid var(--accent);
+}
+.notsale-box form { margin: 4px 0 0; }
+.notsale-box .btn { min-height: 48px; }
+.notsale-title { font-weight: 800; font-size: 17px; }
+.notsale-text { font-size: 14px; line-height: 1.45; }
+.fin-totals.is-notsale { grid-template-columns: repeat(2, 1fr); }
+.notsale-ask {
+  display: flex; flex-direction: column; gap: 6px; margin: 22px 0 6px; padding: 14px;
+  border: 1px dashed var(--border); border-radius: var(--radius);
+}
+.notsale-ask form { margin: 4px 0 0; }
+.notsale-ask .btn { min-height: 48px; white-space: normal; text-align: center; line-height: 1.25; padding: 8px 12px; }
+.notsale-ask-title { font-weight: 700; font-size: 15px; }
+
+.removed-box { margin: 4px 0 16px; box-shadow: none; padding: 0; }
+.removed-box > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px; padding: 10px 14px;
+  cursor: pointer; font-weight: 700; list-style: none;
+}
+.removed-box > summary::-webkit-details-marker { display: none; }
+.removed-box > summary::before { content: "▸"; color: var(--muted); }
+.removed-box[open] > summary::before { content: "▾"; }
+.removed-title { flex: 1; min-width: 0; font-size: 15px; }
+.removed-title .muted { font-weight: 600; font-size: 13px; }
+.removed-help { padding: 0 14px 6px; margin: 0; }
+.removed-list { list-style: none; margin: 0; padding: 0 6px 6px; }
+.removed-list a {
+  display: flex; align-items: center; gap: 10px; padding: 8px; min-height: 60px; border-radius: var(--radius-sm); color: var(--text);
+  border-top: 1px solid var(--border);
+}
+.removed-list a:hover { background: var(--surface-2); text-decoration: none; }
+.removed-img { width: 64px; height: 48px; flex: none; object-fit: cover; border-radius: 7px; font-size: 20px; filter: grayscale(.6); }
+.removed-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.removed-name { font-weight: 700; font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.removed-go { color: var(--muted); font-size: 22px; }
+@media (min-width: 640px) {
+  .notsale-box, .notsale-ask { max-width: 640px; }
+  .notsale-box .btn, .notsale-ask .btn { width: auto; align-self: flex-start; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 800px) {
   .stats { grid-template-columns: repeat(2, 1fr); }
