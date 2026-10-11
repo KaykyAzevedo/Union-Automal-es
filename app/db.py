@@ -20,7 +20,18 @@ DEFAULT_DB_PATH = BASE_DIR / "data" / "union.db"
 TZ = ZoneInfo("America/Sao_Paulo")
 log = logging.getLogger(__name__)
 
-TABLES = ["cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "detail_cache"]
+TABLES = ["cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "detail_cache",
+          "users"]
+
+# F15: funcionários criados sem senha (password_hash NULL): só entram depois que o admin gera a provisória
+SEED_USERS = [
+    ("arthur", "Arthur", "comprador,vendedor"),
+    ("marcelo", "Marcelo", "comprador,vendedor"),
+    ("beto", "Beto", "vendedor"),
+    ("thiago", "Thiago", "vendedor"),
+    ("haroldo", "Haroldo", "documentador"),
+    ("ruan", "Ruan", "chefe"),
+]
 
 # ATENÇÃO: no Postgres este script é dividido em comandos por app.pgcompat.split_statements
 # (comentários `--` são removidos antes). tests/test_pgcompat_split.py confere cada comando.
@@ -106,6 +117,19 @@ CREATE TABLE IF NOT EXISTS detail_cache (
     data         TEXT NOT NULL,          -- JSON do CarDetail
     fetched_at   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,          -- minusculo, sem acento nem espaco
+    name          TEXT NOT NULL,                 -- nome de exibicao
+    roles         TEXT NOT NULL DEFAULT '',      -- cargos separados por virgula (so rotulo, nao muda permissao)
+    password_hash TEXT,                          -- NULL = ainda sem senha (nao entra)
+    must_change   INTEGER NOT NULL DEFAULT 1,    -- 1 = senha provisoria, troca no proximo acesso
+    pw_version    INTEGER NOT NULL DEFAULT 0,    -- sobe a cada troca, reset ou desativacao (derruba sessoes)
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    last_login    TEXT
+);
 """
 # Postgres: mesmo schema, só a PK autoincremento muda
 PG_SCHEMA = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
@@ -187,6 +211,19 @@ def _columns(conn, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def seed_users(conn) -> None:
+    """F15: garante os funcionários iniciais. Só insere username que ainda não existe: nunca
+    reativa, renomeia nem mexe em senha de quem já está no banco. Idempotente."""
+    existing = {r[0] for r in conn.execute("SELECT username FROM users")}
+    for username, name, roles in SEED_USERS:
+        if username in existing:
+            continue  # no Postgres até o INSERT que não grava gasta um número da sequência
+        conn.execute(
+            """INSERT INTO users (username, name, roles, created_at) VALUES (?, ?, ?, ?)
+               ON CONFLICT (username) DO NOTHING""", (username, name, roles, to_iso(now())))
+    conn.commit()
+
+
 def migrate(conn) -> None:
     """Adiciona colunas que faltam em bancos antigos. Idempotente, não apaga dados."""
     for table, column, definition in MIGRATIONS:
@@ -218,6 +255,7 @@ def migrate(conn) -> None:
 
         for row in missing_brand:
             conn.execute("UPDATE cars SET brand = ? WHERE id = ?", (brand_of(row["name"]), row["id"]))
+    seed_users(conn)
     conn.commit()
 
 
@@ -297,7 +335,8 @@ def init_db(conn=None) -> None:
 
 
 def truncate_all(conn) -> None:
-    """Zera todas as tabelas (testes). Postgres: TRUNCATE ... RESTART IDENTITY CASCADE."""
+    """Zera todas as tabelas (testes) e recria os funcionários iniciais (como um banco novo).
+    Postgres: TRUNCATE ... RESTART IDENTITY CASCADE."""
     if is_postgres(conn):
         conn.execute(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE")
     else:
@@ -305,6 +344,7 @@ def truncate_all(conn) -> None:
             conn.execute(f"DELETE FROM {table}")
         if conn.execute("SELECT name FROM sqlite_master WHERE name = 'sqlite_sequence'").fetchone():
             conn.execute("DELETE FROM sqlite_sequence")
+    seed_users(conn)
     conn.commit()
 
 

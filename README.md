@@ -133,11 +133,23 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
     vendidos ou só preços); não são agendados.
   - Respostas JSON: `200 {ok: true, job, result}`; falha no site → `502 {ok: false, error}`;
     Bearer errado → `401`; `CRON_SECRET` ausente → `503`.
-- **Login com dois perfis** (mesma tela; a senha decide o perfil):
-  - **admin** (`APP_PASSWORD`, social media): acesso total.
-  - **equipe** (`STAFF_PASSWORD`, funcionários): só o **Painel da Equipe** (`/equipe` e `/equipe/*`:
-    dias em estoque, sugestões de redução de preço, vendas e financeiro dos carros). Sem `STAFF_PASSWORD`, o perfil
-    equipe fica desativado. Trocar a senha derruba as sessões da equipe.
+- **Login** (tela única: usuário + senha):
+  - **admin** (usuário em branco ou `admin` + `APP_PASSWORD`, social media): acesso total.
+  - **funcionários** (um login por pessoa, tabela `users`): só o **Painel da Equipe** (`/equipe` e
+    `/equipe/*`: dias em estoque, sugestões de redução de preço, vendas e financeiro dos carros).
+    O cargo (comprador, vendedor, documentador, chefe) é só um rótulo: todos têm o mesmo acesso.
+  - **Senhas dos funcionários:** em **Usuários** (`/admin/usuarios`, só admin) o botão
+    "Gerar senha provisória" mostra a senha **uma única vez** na tela. O admin repassa, e a
+    pessoa é obrigada a criar a própria senha no primeiro acesso (`/equipe/senha`, mínimo 8
+    caracteres). Esqueceu a senha: gere outra provisória (a anterior para de funcionar e a
+    sessão aberta cai). Desativar um funcionário derruba a sessão dele na hora. O banco guarda
+    só o hash (scrypt com salt por usuário), nunca a senha.
+  - **Funcionários iniciais:** arthur, marcelo, beto, thiago, haroldo e ruan são criados sem
+    senha na primeira partida (não entram até o admin gerar a provisória). O app nunca recria,
+    reativa nem altera quem já está na tabela. Novos funcionários: formulário em **Usuários**.
+  - **Senha única antiga** (`STAFF_PASSWORD`, usuário em branco ou `equipe`): continua valendo
+    só enquanto existir funcionário ativo sem senha. Quando todos os ativos tiverem senha, ela
+    para de funcionar sozinha e as sessões dela caem. Sem `STAFF_PASSWORD` nunca vale.
   - Na Vercel sem `APP_PASSWORD` o app responde 503. Local sem senhas → tudo aberto (admin).
 - **Arquivos:** só `/tmp` é gravável (cache de fotos). O detalhe do anúncio fica em cache
   na tabela `detail_cache` (10 min), então as 11 prévias do editor fazem um único acesso
@@ -151,7 +163,7 @@ Na nuvem o app roda como uma Vercel Function (detecção automática do FastAPI 
 |---|---|---|
 | `DATABASE_URL` | sim | Injetada pela integração Neon (aceita também `POSTGRES_URL`). Use a URL *pooled*. |
 | `APP_PASSWORD` | sim | Senha do painel (perfil admin). |
-| `STAFF_PASSWORD` | opcional | Senha dos funcionários (perfil equipe: só `/equipe`). Deve ser diferente da `APP_PASSWORD`. |
+| `STAFF_PASSWORD` | opcional | Senha única antiga da equipe, só na transição para o login individual (para de valer quando todos os funcionários ativos tiverem senha). Deve ser diferente da `APP_PASSWORD`. |
 | `SESSION_SECRET` | sim | Texto aleatório longo (assina o cookie de login). |
 | `CRON_SECRET` | sim | Texto aleatório com 16+ caracteres (a Vercel Cron envia no header). |
 | `APP_URL` | recomendada | URL de produção, ex. `https://union-painel.vercel.app` (links no WhatsApp). |

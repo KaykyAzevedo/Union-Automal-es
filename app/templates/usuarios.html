@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% from "partials/_macros.html" import when %}
+{# F15: logins da equipe (só admin). ctx: users, new_password, msg, shared_password_active, role_options. Tudo tolerante. #}
+{% set user_list = users if (users is defined and users) else [] %}
+{% set np = new_password if (new_password is defined and new_password) else none %}
+{% set m = msg if (msg is defined and msg) else none %}
+{% set shared_on = true if (shared_password_active is defined and shared_password_active) else false %}
+{% set role_opts = role_options if (role_options is defined and role_options) else [
+  {'key': 'comprador', 'label': 'Comprador'}, {'key': 'vendedor', 'label': 'Vendedor'},
+  {'key': 'documentador', 'label': 'Documentador'}, {'key': 'chefe', 'label': 'Chefe'}] %}
+{% block title %}Usuários{% endblock %}
+{% block body_class %}page-usuarios{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Usuários da equipe</h1>
+    <p class="muted">Cada funcionário entra com o seu próprio usuário e senha. Todos veem a mesma área da equipe.</p>
+  </div>
+</section>
+
+{# ---------- senha provisória recém-gerada: aparece UMA vez ---------- #}
+{% if np %}
+<section class="newpw-box" id="nova-senha" role="alert" tabindex="-1">
+  <p class="newpw-title">🔑 Senha provisória de {{ np.name }}</p>
+  <p class="newpw-warn">Anote agora: esta senha não aparece de novo.</p>
+  <dl class="newpw-data">
+    <div><dt>Usuário</dt><dd id="newpw-user">{{ np.username }}</dd></div>
+    <div><dt>Senha</dt><dd id="newpw-pass" class="newpw-pass">{{ np.password }}</dd></div>
+  </dl>
+  <div class="newpw-actions">
+    <button type="button" class="btn btn-primary" id="newpw-copy">Copiar usuário e senha</button>
+    <button type="button" class="btn btn-ghost" id="newpw-copy-pass">Copiar só a senha</button>
+  </div>
+  <p class="newpw-status" id="newpw-status" aria-live="polite"></p>
+  <p class="small newpw-help">Passe para {{ np.name }} pessoalmente ou por mensagem. No primeiro acesso, o site pede para criar uma senha própria. Não atualize esta página: isso gera outra senha.</p>
+</section>
+{% endif %}
+
+{% if m == 'saved' %}
+<div class="flash" role="status"><span>✓ Salvo.</span></div>
+{% elif m == 'invalid' %}
+<div class="flash flash-error" role="alert"><span>⚠ Não foi salvo. O usuário deve ter de 2 a 30 caracteres, só letras minúsculas sem acento, números, ponto, traço ou sublinhado — e escolha pelo menos um cargo.</span></div>
+{% elif m == 'exists' %}
+<div class="flash flash-error" role="alert"><span>⚠ Já existe alguém com esse usuário. Escolha outro (por exemplo, com o sobrenome).</span></div>
+{% elif m %}
+<div class="flash flash-error" role="alert"><span>⚠ Não deu para concluir. Tente de novo.</span></div>
+{% endif %}
+
+{% if shared_on %}
+<div class="card warn-box shared-warn">
+  <strong>A senha única antiga ainda funciona até todos terem senha.</strong>
+  <span class="muted small">Gere a senha provisória de quem está como "Sem senha" (ou desative quem não usa). Quando todos os ativos tiverem senha, a senha única para de funcionar sozinha.</span>
+</div>
+{% endif %}
+
+{# ---------- lista ---------- #}
+<section class="section">
+  <div class="section-head">
+    <h2>Funcionários</h2>
+    <span class="pill">{{ user_list | length }}</span>
+  </div>
+
+  {% if user_list %}
+  <ul class="user-list">
+    {% for u in user_list %}
+    {% set has_pw = true if u.has_password else false %}
+    <li class="card user-card {{ 'is-off' if not u.active }}" id="user-{{ u.id }}">
+      <div class="user-main">
+        <div class="user-id">
+          <span class="user-name">{{ u.name }}</span>
+          <span class="muted small">usuário <strong class="user-login">{{ u.username }}</strong>{% if u.roles_label %} · {{ u.roles_label }}{% endif %}</span>
+        </div>
+        {% if not u.active %}<span class="pill pill-muted">Desativado</span>
+        {% elif not has_pw %}<span class="pill pill-warn">Sem senha</span>
+        {% elif u.must_change %}<span class="pill pill-sold">Senha provisória</span>
+        {% else %}<span class="pill pill-ok">Ativo</span>{% endif %}
+      </div>
+      <p class="muted small user-last">
+        {% if not u.active %}Não consegue entrar.
+        {% elif not has_pw %}Ainda não consegue entrar — gere a senha provisória.
+        {% elif u.must_change %}Aguardando o primeiro acesso para criar a própria senha.
+        {% endif %}
+        Último acesso: {% if u.last_login %}<strong>{{ when(u.last_login) }}</strong>{% else %}nunca{% endif %}
+      </p>
+      <div class="user-actions">
+        {% if u.active %}
+        <form method="post" action="/admin/usuarios/{{ u.id }}/senha" data-loading-text="Gerando…"
+              {% if has_pw %}data-confirm="Gerar uma nova senha provisória para {{ u.name }}?&#10;&#10;A senha atual deixa de funcionar na hora e {{ u.name }} é desconectado."{% endif %}>
+          <button type="submit" class="btn {{ 'btn-ghost' if has_pw else 'btn-primary' }} btn-block">Gerar senha provisória</button>
+        </form>
+        <form method="post" action="/admin/usuarios/{{ u.id }}/ativo" data-loading-text="Salvando…"
+              data-confirm="Desativar {{ u.name }}?&#10;&#10;{{ u.name }} é desconectado na hora e não consegue mais entrar. Dá para reativar depois.">
+          <input type="hidden" name="value" value="0">
+          <button type="submit" class="btn btn-outline btn-block">Desativar</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/usuarios/{{ u.id }}/ativo" data-loading-text="Salvando…">
+          <input type="hidden" name="value" value="1">
+          <button type="submit" class="btn btn-accent btn-block">Reativar</button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="card empty"><p class="muted">Nenhum funcionário cadastrado ainda. Use o formulário abaixo.</p></div>
+  {% endif %}
+</section>
+
+{# ---------- novo funcionário ---------- #}
+<section class="section">
+  <div class="section-head"><h2>Novo funcionário</h2></div>
+  <form method="post" action="/admin/usuarios" class="card user-form" id="user-form" data-loading-text="Salvando…">
+    <label class="login-label" for="nu-name">Nome</label>
+    <input class="input" type="text" id="nu-name" name="name" required maxlength="60" autocomplete="off" placeholder="Ex.: João">
+
+    <label class="login-label" for="nu-username">Usuário (o que a pessoa digita para entrar)</label>
+    <input class="input" type="text" id="nu-username" name="username" required minlength="2" maxlength="30" pattern="[a-z0-9._\-]{2,30}"
+           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Ex.: joao"
+           title="De 2 a 30 caracteres: letras minúsculas sem acento, números, ponto, traço ou sublinhado" aria-describedby="nu-help">
+    <p class="muted small" id="nu-help">Só letras minúsculas sem acento, números, ponto, traço ou sublinhado. Sem espaços.</p>
+
+    <fieldset class="role-set">
+      <legend class="login-label">Cargo (pode marcar mais de um)</legend>
+      <div class="role-options">
+        {% for r in role_opts %}
+        <label class="role-opt"><input type="checkbox" name="roles" value="{{ r.key }}"> <span>{{ r.label }}</span></label>
+        {% endfor %}
+      </div>
+      <p class="role-error" id="role-error" role="alert" hidden>Escolha pelo menos um cargo.</p>
+    </fieldset>
+    <p class="muted small">O cargo é só um rótulo: todos têm o mesmo acesso. Depois de salvar, gere a senha provisória na lista acima.</p>
+
+    <button type="submit" class="btn btn-primary btn-block login-submit">Adicionar funcionário</button>
+  </form>
+</section>
+
+<script>
+  (function () {
+    // confirmação antes de trocar a senha de quem já tem ou de desativar
+    document.querySelectorAll('form[data-confirm]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        if (!window.confirm(f.dataset.confirm)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+    });
+
+    // novo funcionário: sugere o usuário a partir do nome e exige um cargo
+    var form = document.getElementById('user-form');
+    var nameEl = document.getElementById('nu-name'), userEl = document.getElementById('nu-username');
+    var roleErr = document.getElementById('role-error');
+    var touched = false;
+    function slug(s) {
+      return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().split(/\s+/)[0].replace(/[^a-z0-9._-]/g, '').slice(0, 30);
+    }
+    userEl.addEventListener('input', function () {
+      touched = userEl.value !== '';
+      var clean = userEl.value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      if (clean !== userEl.value) userEl.value = clean;
+    });
+    nameEl.addEventListener('input', function () { if (!touched) userEl.value = slug(nameEl.value); });
+    form.addEventListener('submit', function (e) {
+      if (!form.querySelector('input[name=roles]:checked')) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        roleErr.hidden = false; roleErr.scrollIntoView({ block: 'center' });
+      }
+    }, true);
+    form.addEventListener('change', function () { if (form.querySelector('input[name=roles]:checked')) roleErr.hidden = true; });
+
+    // senha provisória: copiar (lê o texto da própria tela — a senha não vai para nenhum outro lugar)
+    var box = document.getElementById('nova-senha');
+    if (box) {
+      box.focus({ preventScroll: true }); box.scrollIntoView({ block: 'start' });
+      var user = document.getElementById('newpw-user').textContent, pass = document.getElementById('newpw-pass').textContent;
+      var status = document.getElementById('newpw-status');
+      function copy(text, okMsg) {
+        function done() { status.textContent = '✓ ' + okMsg; status.className = 'newpw-status is-ok'; }
+        function fail() { status.textContent = 'Não deu para copiar sozinho. Segure o dedo em cima da senha e escolha "Copiar".'; status.className = 'newpw-status is-bad'; }
+        function legacy() {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+          document.body.removeChild(ta); ok ? done() : fail();
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, legacy); else legacy();
+      }
+      document.getElementById('newpw-copy').addEventListener('click', function () {
+        copy('Usuário: ' + user + '\nSenha provisória: ' + pass, 'Usuário e senha copiados.');
+      });
+      document.getElementById('newpw-copy-pass').addEventListener('click', function () { copy(pass, 'Senha copiada.'); });
+    }
+    // tira ?msg= da URL para o aviso não reaparecer ao recarregar a página
+    if (/[?&]msg=/.test(location.search) && history.replaceState) history.replaceState(null, '', location.pathname);
+  })();
+</script>
+{% endblock %}

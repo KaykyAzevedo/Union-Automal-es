@@ -36,6 +36,8 @@ STAFF_ROUTES = {
     ("POST", "/equipe/carro/1/nao-venda"),   # F14
     ("POST", "/equipe/carro/1/despesas"),
     ("POST", "/equipe/carro/1/despesas/1/excluir"),
+    ("GET", "/equipe/senha"),    # F15
+    ("POST", "/equipe/senha"),   # F15
 }
 PUBLIC = {"/login", "/logout", "/health", "/favicon.ico"}
 FINANCE_POSTS = ("custo", "venda", "despesas", "despesas/1/excluir")
@@ -149,7 +151,8 @@ def test_staff_reaches_only_team_area(staff, site, two_cars, conn):
         if (method, path) in STAFF_ROUTES:
             assert r.status_code in (200, 303), (method, path, r.status_code)
             assert not r.headers.get("location", "").startswith("/login")
-    assert reached == STAFF_ROUTES
+    # F15: na senha única não há senha própria para trocar: GET /equipe/senha devolve para /equipe
+    assert reached == STAFF_ROUTES - {("GET", "/equipe/senha")}
     assert len(blocked) >= 12 and ("POST", "/admin/check-now") in blocked and ("GET", "/") in blocked
     assert site.calls == 0
 

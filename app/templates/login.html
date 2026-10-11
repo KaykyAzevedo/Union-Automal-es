@@ -4,49 +4,61 @@
 {% block nav %}{% endblock %}
 
 {% block content %}
+{# F15: login individual. Tolerante: `error` e `username` podem não vir no contexto. #}
+{% set err = error if (error is defined and error) else none %}
+{% set typed = username if (username is defined and username) else '' %}
 <section class="login-wrap">
   <div class="login-card card">
     <div class="login-head">
       <img class="login-logo" src="/static/logo-dark.png" alt="Union Veículos" width="260" height="63">
-      <p class="login-sub">Painel de Social Media</p>
+      <p class="login-sub">Área da equipe</p>
     </div>
 
-    <form class="login-form" method="post" action="/login" autocomplete="on">
+    <form class="login-form" method="post" action="/login" autocomplete="on" data-loading-text="Entrando…">
       {% if next is defined and next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
-      {# campo oculto de usuário: ajuda gerenciadores de senha a salvar a credencial #}
-      <input type="text" name="username" value="union" autocomplete="username" hidden aria-hidden="true" tabindex="-1">
+
+      <p class="login-hint">Use o usuário e a senha que você recebeu.</p>
+
+      <label class="login-label" for="username">Usuário</label>
+      <input class="input login-input {{ 'has-error' if err }}" type="text" id="username" name="username" value="{{ typed }}"
+             autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text"
+             maxlength="60" placeholder="Ex.: arthur" {% if not typed %}autofocus{% endif %}
+             {% if err %}aria-invalid="true" aria-describedby="login-error"{% endif %}>
 
       <label class="login-label" for="password">Senha</label>
-      <div class="password-field {{ 'has-error' if error }}">
-        <input class="input" type="password" id="password" name="password" required autofocus
-               autocomplete="current-password" placeholder="Digite a senha do painel"
-               {% if error %}aria-invalid="true" aria-describedby="login-error"{% endif %}>
-        <button type="button" class="password-toggle" id="password-toggle" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+      <div class="password-field {{ 'has-error' if err }}">
+        <input class="input" type="password" id="password" name="password" required {% if typed %}autofocus{% endif %}
+               autocomplete="current-password" autocapitalize="off" placeholder="Digite a sua senha"
+               {% if err %}aria-invalid="true" aria-describedby="login-error"{% endif %}>
+        <button type="button" class="password-toggle" data-toggle="password" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
       </div>
 
-      {% if error %}
-      <p class="login-error" id="login-error" role="alert">⚠ {{ error }}</p>
+      {% if err %}
+      <p class="login-error" id="login-error" role="alert">⚠ {{ err }}</p>
       {% endif %}
 
       <button type="submit" class="btn btn-primary btn-block login-submit">Entrar</button>
     </form>
   </div>
-  <p class="muted small login-foot">Acesso restrito à equipe Union Veículos.</p>
+  <p class="muted small login-foot">Acesso restrito à equipe Union Veículos.<br>Esqueceu a senha? Peça uma nova ao administrador.</p>
 </section>
 
 <script>
   (function () {
-    var input = document.getElementById('password');
-    var toggle = document.getElementById('password-toggle');
-    toggle.addEventListener('click', function () {
-      var show = input.type === 'password';
-      input.type = show ? 'text' : 'password';
-      toggle.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
-      toggle.title = toggle.getAttribute('aria-label');
-      toggle.classList.toggle('is-on', show);
-      input.focus();
+    document.querySelectorAll('[data-toggle]').forEach(function (toggle) {
+      var input = document.getElementById(toggle.dataset.toggle);
+      toggle.addEventListener('click', function () {
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        toggle.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+        toggle.title = toggle.getAttribute('aria-label');
+        toggle.classList.toggle('is-on', show);
+        input.focus();
+      });
     });
-    {% if error %}input.select();{% endif %}
+    // o usuário é sempre minúsculo e sem espaços nas pontas (o teclado do celular costuma atrapalhar)
+    var user = document.getElementById('username');
+    user.form.addEventListener('submit', function () { user.value = user.value.trim().toLowerCase(); }, true);
   })();
 </script>
 {% endblock %}

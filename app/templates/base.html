@@ -41,6 +41,9 @@
         <a href="/equipe" class="{{ 'active' if path.startswith('/equipe') and not in_sales }}">Equipe</a>
         {% if not is_staff %}
         <a href="/equipe/vendas" class="{{ 'active' if in_sales }}">Vendas</a>
+        {% if auth_enabled is defined and auth_enabled %}
+        <a href="/admin/usuarios" class="{{ 'active' if path.startswith('/admin/usuarios') }}">Usuários</a>
+        {% endif %}
         {% endif %}
         {% if auth_enabled is defined and auth_enabled %}
         <form method="post" action="/logout" class="logout-form">

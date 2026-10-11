@@ -91,7 +91,7 @@ def test_login_ok_sets_cookie_and_opens_panel(client, locked):
 def test_login_wrong_password(client, locked):
     r = _login(client, "errada")
     assert r.status_code == 401
-    assert "Senha incorreta" in r.text
+    assert auth.LOGIN_ERROR in r.text  # F15: mensagem única "Usuário ou senha incorretos"
     assert auth.COOKIE_NAME not in r.headers.get("set-cookie", "")
     assert client.get("/", follow_redirects=False).status_code == 303
 

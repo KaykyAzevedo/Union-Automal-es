@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{# F15: troca de senha do funcionário. ctx: user {name, username, roles_label}, forced (bool), msg. Tudo tolerante. #}
+{% set u = user if (user is defined and user) else (current_user if (current_user is defined and current_user) else none) %}
+{% set is_forced = true if (forced is defined and forced) else false %}
+{% set m = msg if (msg is defined and msg) else none %}
+{% block title %}{{ 'Crie a sua senha' if is_forced else 'Trocar senha' }}{% endblock %}
+{% block body_class %}page-senha{{ ' is-forced' if is_forced }}{% endblock %}
+
+{# primeiro acesso: sem navegação (só dá para criar a senha ou sair) #}
+{% block nav %}
+{% if is_forced %}
+<form method="post" action="/logout" class="logout-form">
+  <button type="submit" class="nav-logout" title="Sair do painel">Sair</button>
+</form>
+{% else %}{{ super() }}{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if not is_forced %}
+{% set team_tab = 'senha' %}
+{% include "partials/team_tabs.html" %}
+{% endif %}
+
+<section class="pw-wrap">
+  <div class="card pw-card">
+    {% if is_forced %}
+    <h1 class="pw-title">Primeiro acesso: crie a sua senha</h1>
+    <p class="muted">{% if u and u.name %}Olá, <strong>{{ u.name }}</strong>! {% endif %}A senha que você recebeu é provisória. Escolha agora uma senha só sua para continuar.</p>
+    {% else %}
+    <h1 class="pw-title">Trocar senha</h1>
+    <p class="muted">{% if u and u.name %}<strong>{{ u.name }}</strong>{% if u.username %} · usuário <strong>{{ u.username }}</strong>{% endif %}{% if u.roles_label %} · {{ u.roles_label }}{% endif %}{% else %}Escolha uma senha nova.{% endif %}</p>
+    {% endif %}
+
+    {% if m == 'saved' %}
+    <p class="pw-msg pw-ok" role="status">✓ Senha trocada com sucesso.</p>
+    {% elif m == 'wrong' %}
+    <p class="pw-msg pw-err" role="alert">⚠ A {{ 'senha provisória' if is_forced else 'senha atual' }} está errada. Confira e tente de novo.</p>
+    {% elif m == 'weak' %}
+    <p class="pw-msg pw-err" role="alert">⚠ Senha fraca ou digitações diferentes. Use pelo menos 8 caracteres, sem o seu nome ou usuário e sem sequências fáceis como 12345678 ou senha123.</p>
+    {% elif m == 'same' %}
+    <p class="pw-msg pw-err" role="alert">⚠ A nova senha precisa ser diferente da {{ 'provisória' if is_forced else 'atual' }}.</p>
+    {% elif m %}
+    <p class="pw-msg pw-err" role="alert">⚠ Não deu para trocar a senha. Confira os campos e tente de novo.</p>
+    {% endif %}
+
+    <form method="post" action="/equipe/senha" class="pw-form" id="pw-form" autocomplete="on" data-loading-text="Salvando…">
+      {# ajuda o gerenciador de senhas do celular a guardar a senha no usuário certo #}
+      {% if u and u.username %}<input type="text" name="username" value="{{ u.username }}" autocomplete="username" hidden aria-hidden="true" tabindex="-1" readonly>{% endif %}
+
+      <label class="login-label" for="current">{{ 'Senha provisória (a que você recebeu)' if is_forced else 'Senha atual' }}</label>
+      <div class="password-field {{ 'has-error' if m == 'wrong' }}">
+        <input class="input" type="password" id="current" name="current" required autocomplete="current-password" autocapitalize="off"
+               {% if m != 'weak' and m != 'same' %}autofocus{% endif %}>
+        <button type="button" class="password-toggle" data-toggle="current" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+      </div>
+
+      <label class="login-label" for="new">Nova senha</label>
+      <div class="password-field {{ 'has-error' if m in ('weak', 'same') }}">
+        <input class="input" type="password" id="new" name="new" required minlength="8" maxlength="128" autocomplete="new-password" autocapitalize="off"
+               aria-describedby="pw-rule" {% if m in ('weak', 'same') %}autofocus{% endif %}>
+        <button type="button" class="password-toggle" data-toggle="new" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+      </div>
+      <p class="pw-rule" id="pw-rule"><span id="pw-count">Mínimo de 8 caracteres, sem o seu nome e sem sequências fáceis.</span></p>
+
+      <label class="login-label" for="confirm">Repita a nova senha</label>
+      <div class="password-field">
+        <input class="input" type="password" id="confirm" name="confirm" required minlength="8" maxlength="128" autocomplete="new-password" autocapitalize="off"
+               aria-describedby="pw-match">
+        <button type="button" class="password-toggle" data-toggle="confirm" aria-label="Mostrar senha" title="Mostrar senha">👁</button>
+      </div>
+      <p class="pw-rule" id="pw-match" aria-live="polite"></p>
+
+      <button type="submit" class="btn btn-primary btn-block login-submit">{{ 'Criar minha senha' if is_forced else 'Salvar nova senha' }}</button>
+      {% if not is_forced %}<a href="/equipe" class="btn btn-outline btn-block pw-cancel">Voltar sem trocar</a>{% endif %}
+    </form>
+  </div>
+  <p class="muted small pw-foot">Não conte a sua senha para ninguém. Se esquecer, peça uma nova ao administrador.</p>
+</section>
+
+<script>
+  (function () {
+    document.querySelectorAll('[data-toggle]').forEach(function (toggle) {
+      var input = document.getElementById(toggle.dataset.toggle);
+      toggle.addEventListener('click', function () {
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        toggle.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+        toggle.title = toggle.getAttribute('aria-label');
+        toggle.classList.toggle('is-on', show);
+        input.focus();
+      });
+    });
+
+    var cur = document.getElementById('current'), nw = document.getElementById('new'), cf = document.getElementById('confirm');
+    var count = document.getElementById('pw-count'), match = document.getElementById('pw-match');
+    function check() {
+      // só orientação: quem decide se a senha é aceita é o servidor (espaços nas pontas não contam)
+      var HINT = 'Mínimo de 8 caracteres, sem o seu nome e sem sequências fáceis.';
+      var n = nw.value.trim().length;
+      count.textContent = (n > 0 && n < 8) ? 'Faltam ' + (8 - n) + ' caractere' + (8 - n === 1 ? '' : 's') + '. Sem o seu nome e sem sequências fáceis.' : HINT;
+      count.className = '';
+      var same = n > 0 && nw.value === cur.value;
+      nw.setCustomValidity(same ? 'A nova senha precisa ser diferente da atual.' : '');
+      if (same) { count.textContent = 'A nova senha precisa ser diferente da atual.'; count.className = 'is-bad'; }
+      var differ = cf.value.length > 0 && cf.value !== nw.value;
+      cf.setCustomValidity(differ ? 'As duas senhas precisam ser iguais.' : '');
+      match.textContent = cf.value.length === 0 ? '' : (differ ? '✗ As duas senhas ainda não estão iguais.' : '✓ As duas senhas estão iguais.');
+      match.className = 'pw-rule ' + (differ ? 'is-bad' : 'is-ok');
+    }
+    [cur, nw, cf].forEach(function (el) { el.addEventListener('input', check); });
+    // tira ?msg= da URL para o aviso não reaparecer ao recarregar a página
+    if (/[?&]msg=/.test(location.search) && history.replaceState) history.replaceState(null, '', location.pathname);
+  })();
+</script>
+{% endblock %}

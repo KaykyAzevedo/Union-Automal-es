@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from . import db
 from .services import queries
 from .services.formatting import brl, dt
-from .services import aging, finance, jobs
+from .services import aging, finance, jobs, users
 from .services.jobs import daily_job, poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
@@ -143,6 +143,85 @@ def equipe_carro_despesa(car_id: int, description: str = Form(""), amount: str =
 @app.post("/equipe/carro/{car_id}/despesas/{expense_id}/excluir", dependencies=TEAM)
 def equipe_carro_despesa_excluir(car_id: int, expense_id: int, conn=Depends(db.get_conn)):
     return _finance_saved(conn, car_id, lambda c, i: finance.delete_expense(c, i, expense_id))
+
+
+# ---- F15: login individual por funcionário ----------------------------------------
+# /login e /logout, sessão, must_change e o ctx `current_user` ficam em app/auth.py.
+# Senhas: app/services/users.py. Aqui só as telas. NUNCA registrar senha em log nem em URL.
+
+PASSWORD_MSGS = {"saved", "wrong", "weak", "same"}
+USER_MSGS = {"saved", "invalid", "exists"}
+ADMIN_ONLY = [Depends(require_role(auth.ADMIN))]
+
+
+@app.get("/equipe/senha", response_class=HTMLResponse, dependencies=TEAM)
+def equipe_senha(request: Request, msg: str | None = None):
+    """Troca de senha do funcionário logado. Admin e senha única não têm senha própria: voltam ao início."""
+    user = auth.current_user(request)
+    if user is None:
+        return RedirectResponse(auth.home_for(auth.current_role(request)), status_code=303)
+    return templates.TemplateResponse(request, "senha.html", {
+        "user": {"name": user["name"], "username": user["username"], "roles_label": user["roles_label"]},
+        "forced": bool(user["must_change"]),
+        "msg": msg if msg in PASSWORD_MSGS else None,
+    }, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/equipe/senha", dependencies=TEAM)
+def equipe_senha_salvar(request: Request, current: str = Form(""), new: str = Form(""), confirm: str = Form(""),
+                        conn=Depends(db.get_conn)):
+    user = auth.current_user(request)
+    if user is None:
+        return RedirectResponse(auth.home_for(auth.current_role(request)), status_code=303)
+    result = "weak" if new != confirm else users.change_password(conn, user["id"], current, new)
+    if result != "saved":
+        return RedirectResponse(f"/equipe/senha?msg={result if result in PASSWORD_MSGS else 'weak'}", status_code=303)
+    # a troca sobe o pw_version: o cookie antigo morreu, este entra no lugar
+    return auth.login_response(request, users.get_user(conn, user["id"]), "/equipe")
+
+
+def _users_page(request: Request, conn, msg: str | None = None, new_password: dict | None = None):
+    return templates.TemplateResponse(request, "usuarios.html", {
+        "users": users.list_users(conn),
+        "new_password": new_password,
+        "msg": msg if msg in USER_MSGS else None,
+        "shared_password_active": auth.shared_password_active(conn),
+        "role_options": users.role_options(),
+    }, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin/usuarios", response_class=HTMLResponse, dependencies=ADMIN_ONLY)
+def admin_usuarios(request: Request, msg: str | None = None, conn=Depends(db.get_conn)):
+    return _users_page(request, conn, msg)
+
+
+@app.post("/admin/usuarios", dependencies=ADMIN_ONLY)
+def admin_usuarios_criar(name: str = Form(""), username: str = Form(""), roles: list[str] = Form([]),
+                         conn=Depends(db.get_conn)):
+    result = users.create_user(conn, username, name, roles)
+    return RedirectResponse(f"/admin/usuarios?msg={result if result in USER_MSGS else 'invalid'}", status_code=303)
+
+
+@app.post("/admin/usuarios/{user_id}/senha", response_class=HTMLResponse, dependencies=ADMIN_ONLY)
+def admin_usuarios_senha(request: Request, user_id: int, conn=Depends(db.get_conn)):
+    """Gera a senha provisória e mostra UMA vez, na própria resposta (200, no-store).
+    Nada de redirect: a senha não pode passar por URL, cookie, log nem ficar em texto no banco."""
+    password = users.reset_password(conn, user_id) if finance.valid_id(user_id) else None
+    if password is None:
+        raise HTTPException(404, "Funcionário não encontrado")
+    user = users.get_user(conn, user_id)
+    return _users_page(request, conn, new_password={
+        "name": user["name"], "username": user["username"], "password": password})
+
+
+@app.post("/admin/usuarios/{user_id}/ativo", dependencies=ADMIN_ONLY)
+def admin_usuarios_ativo(user_id: int, value: str = Form(""), conn=Depends(db.get_conn)):
+    """value='1' reativa, '0' desativa (derruba a sessão do funcionário na hora)."""
+    if value not in ("0", "1"):
+        return RedirectResponse("/admin/usuarios?msg=invalid", status_code=303)
+    if not finance.valid_id(user_id) or not users.set_active(conn, user_id, value == "1"):
+        raise HTTPException(404, "Funcionário não encontrado")
+    return RedirectResponse("/admin/usuarios?msg=saved", status_code=303)
 
 
 @app.get("/cars", response_class=HTMLResponse)

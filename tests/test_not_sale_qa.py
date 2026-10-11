@@ -193,6 +193,7 @@ def test_nao_venda_is_the_only_new_equipe_route():
                     for m in r.methods - {"HEAD", "OPTIONS"})
     assert equipe == sorted([
         ("GET", "/equipe"), ("GET", "/equipe/vendas"), ("GET", "/equipe/carro/{car_id}"),
+        ("GET", "/equipe/senha"), ("POST", "/equipe/senha"),   # F15
         ("POST", "/equipe/carro/{car_id}/custo"), ("POST", "/equipe/carro/{car_id}/venda"),
         ("POST", "/equipe/carro/{car_id}/nao-venda"), ("POST", "/equipe/carro/{car_id}/despesas"),
         ("POST", "/equipe/carro/{car_id}/despesas/{expense_id}/excluir"),

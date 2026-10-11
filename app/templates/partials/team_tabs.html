@@ -1,4 +1,20 @@
-{# Abas da área da equipe. Uso: {% set team_tab = 'estoque' | 'vendas' %}{% include "partials/team_tabs.html" %} #}
+{# Abas da área da equipe. Uso: {% set team_tab = 'estoque' | 'vendas' | 'senha' %}{% include "partials/team_tabs.html" %} #}
+{# F15: saudação de quem entrou com login próprio. `current_user` ausente/None (admin ou senha única) = sem saudação. #}
+{% set cu = current_user if (current_user is defined and current_user) else none %}
+{% if cu %}
+<div class="team-user">
+  <p class="team-user-hello">
+    <span class="team-user-name">Olá, {{ cu.name }}</span>
+    {%- if cu.roles_label %}<span class="team-user-role"> · {{ cu.roles_label }}</span>{% endif %}
+  </p>
+  <div class="team-user-links">
+    <a href="/equipe/senha" class="{{ 'active' if team_tab == 'senha' }}" {% if team_tab == 'senha' %}aria-current="page"{% endif %}>Trocar senha</a>
+    <form method="post" action="/logout" class="team-user-logout">
+      <button type="submit">Sair</button>
+    </form>
+  </div>
+</div>
+{% endif %}
 <nav class="team-tabs" aria-label="Área da equipe">
   <a href="/equipe" class="{{ 'active' if team_tab == 'estoque' }}" {% if team_tab == 'estoque' %}aria-current="page"{% endif %}>🚗 Estoque</a>
   <a href="/equipe/vendas" class="{{ 'active' if team_tab == 'vendas' }}" {% if team_tab == 'vendas' %}aria-current="page"{% endif %}>💰 Vendas</a>

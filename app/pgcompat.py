@@ -15,7 +15,7 @@ import re
 import psycopg
 
 # tabelas com PK `id` serial (lastrowid via RETURNING id)
-ID_TABLES = {"cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs"}
+ID_TABLES = {"cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "users"}
 _INSERT_RE = re.compile(r"^\s*INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
 
 
@@ -138,7 +138,8 @@ class PgConnection:
         query, returning = translate(sql)
         cur = self._conn.cursor()
         cur.execute(query, tuple(params or ()))
-        lastrowid = cur.fetchone()[0] if returning else None
+        row = cur.fetchone() if returning else None  # sem linha: INSERT ... ON CONFLICT DO NOTHING
+        lastrowid = row[0] if row else None
         return PgCursor(cur, lastrowid)
 
     def executemany(self, sql: str, seq) -> PgCursor:
