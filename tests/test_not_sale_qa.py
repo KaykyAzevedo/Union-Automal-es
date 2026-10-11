@@ -194,6 +194,10 @@ def test_nao_venda_is_the_only_new_equipe_route():
     assert equipe == sorted([
         ("GET", "/equipe"), ("GET", "/equipe/vendas"), ("GET", "/equipe/carro/{car_id}"),
         ("GET", "/equipe/senha"), ("POST", "/equipe/senha"),   # F15
+        ("GET", "/equipe/clientes"), ("GET", "/equipe/clientes/novo"),   # F16
+        ("GET", "/equipe/clientes/{customer_id}"), ("POST", "/equipe/clientes"),
+        ("POST", "/equipe/clientes/{customer_id}"), ("POST", "/equipe/clientes/{customer_id}/parabens"),
+        ("POST", "/equipe/clientes/{customer_id}/excluir"),
         ("POST", "/equipe/carro/{car_id}/custo"), ("POST", "/equipe/carro/{car_id}/venda"),
         ("POST", "/equipe/carro/{car_id}/nao-venda"), ("POST", "/equipe/carro/{car_id}/despesas"),
         ("POST", "/equipe/carro/{car_id}/despesas/{expense_id}/excluir"),

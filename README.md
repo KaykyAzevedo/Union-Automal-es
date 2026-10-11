@@ -63,6 +63,25 @@ dias em estoque, com sugestão de redução de preço. Regras em `app/services/a
   viu o carro pela 1ª vez. Carros do registro inicial (1ª coleta) mostram
   "há pelo menos X dias", porque a entrada real é anterior.
 
+## Clientes e aniversários (`/equipe/clientes`)
+
+Visível e editável por **admin e equipe**; todos veem todos os clientes, com o nome de quem
+cadastrou. Regras em `app/services/customers.py`, tabela `customers`.
+
+- **Cadastro:** nome, WhatsApp (com DDD), aniversário (dia e mês; ano opcional), e-mail,
+  carro comprado, data da compra e observações. Sem CPF. O mesmo WhatsApp não entra duas vezes.
+- **Aniversariantes:** a tela mostra os de hoje, os dos próximos 7 dias e os do resto do
+  mês (data de America/Sao_Paulo; 29/02 conta em 28/02 nos anos não bissextos). A aba
+  **Clientes** ganha um selo com quantos fazem aniversário hoje.
+- **O site não envia mensagem sozinho.** O botão "Dar parabéns no WhatsApp" abre o WhatsApp
+  de quem está logado com a mensagem pronta (link `wa.me`), e a pessoa aperta enviar. Depois
+  marca **"enviado"**, que fica registrado no ano com o nome de quem enviou (dá para desfazer).
+  Só dá para marcar no próprio dia do aniversário.
+- **Excluir:** só o admin ou o funcionário que cadastrou aquele cliente.
+- **Dados pessoais:** nome, telefone e e-mail nunca vão para log nem para a URL. Formulário
+  com erro é mostrado de novo com o que foi digitado, sem redirecionar. A busca (`?q=`) é
+  a única exceção: o texto procurado aparece na URL.
+
 ## Vendas e financeiro (`/equipe/vendas`, `/equipe/carro/{id}`)
 
 Visível e editável por **admin e equipe** (tudo sob `/equipe/*`). Regras em

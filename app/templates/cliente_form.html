@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{# F16: cadastro/edição de cliente. ctx: customer|None (gravado), form|None (texto digitado, quando o envio falhou), msg, can_delete.
+   Tolerante: lê de `form` quando existe, senão de `customer`; qualquer chave ausente = vazio. #}
+{% set cust = customer if (customer is defined and customer) else none %}
+{% set src = form if (form is defined and form) else (cust if cust else {}) %}
+{% set cid = cust.id if (cust and cust.id is defined and cust.id) else (src.id if (src.id is defined and src.id) else none) %}
+{% set m = msg if (msg is defined and msg) else none %}
+{% set deletable = true if (can_delete is defined and can_delete and cid) else false %}
+{% set action = '/equipe/clientes/' ~ cid if cid else '/equipe/clientes' %}
+{% macro val(key) -%}
+  {%- if src[key] is defined and src[key] is not none %}{{ src[key] }}{% endif -%}
+{%- endmacro %}
+{# data da compra: aceita date ou texto ISO #}
+{% set pd = src.purchase_date if (src.purchase_date is defined and src.purchase_date) else '' %}
+{% set pd_value = (pd if pd is string else pd.isoformat())[:10] if pd else '' %}
+{% set b_day = val('birth_day') | trim %}
+{% set b_month = val('birth_month') | trim %}
+{% set b_year = val('birth_year') | trim %}
+{# se só veio o texto 'dd/mm' ou 'dd/mm/aaaa', reparte nos três campos #}
+{% if not b_day and not b_month and src.birthday is defined and src.birthday and src.birthday is string and '/' in src.birthday %}
+  {% set parts = src.birthday.split('/') %}
+  {% set b_day = parts[0] | trim %}{% set b_month = (parts[1] | trim) if parts | length > 1 else '' %}{% set b_year = (parts[2] | trim) if parts | length > 2 else '' %}
+{% endif %}
+{% set b_month_num = (b_month | int(0)) %}
+{% set months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'] %}
+{% block title %}{{ 'Editar cliente' if cid else 'Novo cliente' }}{% endblock %}
+{% block body_class %}page-cliente-form{% endblock %}
+
+{% block content %}
+{% set team_tab = 'clientes' %}
+{% include "partials/team_tabs.html" %}
+
+<a href="/equipe/clientes" class="back-link">‹ Voltar para os clientes</a>
+
+<section class="page-head">
+  <div>
+    <h1>{{ 'Editar cliente' if cid else 'Novo cliente' }}</h1>
+    <p class="muted">{% if cid and cust and cust.created_by_name %}Cadastrado por {{ cust.created_by_name }}. {% endif %}Os campos com <span class="req">*</span> são obrigatórios.</p>
+  </div>
+</section>
+
+{% if m == 'invalid' %}
+<div class="flash flash-error form-error" role="alert" id="form-error">
+  <div>
+    <strong>⚠ Não foi salvo. Confira os campos:</strong>
+    <ul>
+      <li><strong>Nome</strong>: pelo menos 2 letras.</li>
+      <li><strong>WhatsApp</strong>: com DDD, por exemplo (21) 99999-0000.</li>
+      <li><strong>Aniversário</strong>: dia e mês que existam (o ano é opcional e não pode ser no futuro).</li>
+      <li><strong>E-mail</strong> e <strong>data da compra</strong>, se preenchidos, precisam estar certos.</li>
+    </ul>
+  </div>
+</div>
+{% elif m == 'duplicate' %}
+<div class="flash flash-error form-error" role="alert" id="form-error">
+  <span><strong>⚠ Não foi salvo: já existe um cliente com esse WhatsApp.</strong> Procure o cadastro na lista de clientes e edite por lá.</span>
+</div>
+{% elif m == 'saved' %}
+<div class="flash" role="status"><span>✓ Salvo.</span></div>
+{% elif m %}
+<div class="flash flash-error form-error" role="alert" id="form-error"><span>⚠ Não deu para salvar. Confira os campos e tente de novo.</span></div>
+{% endif %}
+
+<form method="post" action="{{ action }}" class="card customer-form" id="customer-form" autocomplete="off" data-loading-text="Salvando…">
+  <label class="login-label" for="c-name">Nome <span class="req">*</span></label>
+  <input class="input" type="text" id="c-name" name="name" value="{{ val('name') }}" required minlength="2" maxlength="80"
+         autocomplete="off" autocapitalize="words" placeholder="Nome do cliente" {% if not cid and not m %}autofocus{% endif %}>
+
+  <label class="login-label" for="c-phone">WhatsApp (com DDD) <span class="req">*</span></label>
+  <input class="input" type="tel" id="c-phone" name="phone" value="{{ (src.phone_display if (src.phone_display is defined and src.phone_display) else val('phone')) }}" required
+         inputmode="tel" maxlength="20" autocomplete="off" placeholder="(21) 99999-0000" aria-describedby="c-phone-help">
+  <p class="muted small" id="c-phone-help">Com o DDD. Não precisa do +55.</p>
+
+  <fieldset class="bday-set">
+    <legend class="login-label">Aniversário <span class="req">*</span></legend>
+    <div class="bday-fields">
+      <div class="bday-field">
+        <label class="small muted" for="c-day">Dia</label>
+        <input class="input" type="text" id="c-day" name="birth_day" value="{{ b_day }}" required inputmode="numeric" pattern="0?[1-9]|[12][0-9]|3[01]" maxlength="2"
+               autocomplete="off" placeholder="15" title="Dia de 1 a 31">
+      </div>
+      <div class="bday-field bday-field-month">
+        <label class="small muted" for="c-month">Mês</label>
+        <select class="input" id="c-month" name="birth_month" required>
+          <option value="" {{ 'selected' if not b_month_num }}>Escolha…</option>
+          {% for name in months %}
+          <option value="{{ loop.index }}" {{ 'selected' if b_month_num == loop.index }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="bday-field">
+        <label class="small muted" for="c-year">Ano (opcional)</label>
+        <input class="input" type="text" id="c-year" name="birth_year" value="{{ b_year }}" inputmode="numeric" pattern="(19|20)[0-9]{2}" maxlength="4"
+               autocomplete="off" placeholder="1985" title="Ano com 4 números, por exemplo 1985">
+      </div>
+    </div>
+    <p class="muted small">Se não souber o ano, deixe em branco: o dia e o mês bastam.</p>
+  </fieldset>
+
+  <label class="login-label" for="c-car">Carro comprado</label>
+  <input class="input" type="text" id="c-car" name="car_text" value="{{ val('car_text') }}" maxlength="120" autocomplete="off" placeholder="Ex.: Corolla XEi 2020 prata">
+
+  <label class="login-label" for="c-purchase">Data da compra</label>
+  <input class="input" type="date" id="c-purchase" name="purchase_date" value="{{ pd_value }}" min="1990-01-01">
+
+  <label class="login-label" for="c-email">E-mail</label>
+  <input class="input" type="email" id="c-email" name="email" value="{{ val('email') }}" maxlength="120" autocomplete="off" autocapitalize="off" inputmode="email" placeholder="nome@exemplo.com">
+
+  <label class="login-label" for="c-notes">Observações</label>
+  <textarea class="input customer-notes" id="c-notes" name="notes" maxlength="1000" rows="4" placeholder="Ex.: prefere contato à tarde, indicou um amigo…">{{ val('notes') }}</textarea>
+  <p class="muted small notes-count" id="notes-count" aria-live="polite"></p>
+
+  <button type="submit" class="btn btn-primary btn-block btn-lg">{{ 'Salvar alterações' if cid else 'Salvar cliente' }}</button>
+  <a href="/equipe/clientes" class="btn btn-outline btn-block customer-cancel">Cancelar</a>
+</form>
+
+{% if deletable %}
+<section class="customer-danger">
+  <p class="muted small">Cadastrou por engano ou o cliente pediu para sair?</p>
+  <form method="post" action="/equipe/clientes/{{ cid }}/excluir" data-loading-text="Excluindo…"
+        data-confirm="Excluir este cliente?&#10;&#10;O cadastro é apagado de vez e não dá para desfazer.">
+    <button type="submit" class="btn btn-outline btn-block btn-danger-outline">Excluir cliente</button>
+  </form>
+</section>
+{% endif %}
+
+<script>
+  (function () {
+    document.querySelectorAll('form[data-confirm]').forEach(function (f) {
+      f.addEventListener('submit', function (e) {
+        if (!window.confirm(f.dataset.confirm)) { e.preventDefault(); e.stopImmediatePropagation(); }
+      }, true);
+    });
+    // só números no dia e no ano
+    ['c-day', 'c-year'].forEach(function (id) {
+      var el = document.getElementById(id);
+      el.addEventListener('input', function () { var v = el.value.replace(/\D/g, ''); if (v !== el.value) el.value = v; });
+    });
+    // confere se o dia existe no mês escolhido (29/02 vale)
+    var day = document.getElementById('c-day'), month = document.getElementById('c-month');
+    var MAX = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    function checkDay() {
+      var d = parseInt(day.value, 10), mo = parseInt(month.value, 10);
+      day.setCustomValidity(d && mo && d > MAX[mo - 1] ? 'Esse mês não tem dia ' + d + '.' : '');
+    }
+    day.addEventListener('input', checkDay); month.addEventListener('change', checkDay); checkDay();
+    // máscara leve do telefone enquanto digita: (21) 99999-0000
+    var phone = document.getElementById('c-phone');
+    phone.addEventListener('input', function (e) {
+      if (/^\s*[+0]/.test(phone.value)) return;                               // quem digita +55… ou 021… fica como digitou
+      if (e.inputType && e.inputType.indexOf('delete') === 0) return;         // não briga com quem está apagando
+      var d = phone.value.replace(/\D/g, '');
+      if (d.length > 11) return;
+      var out = d;
+      if (d.length > 2) out = '(' + d.slice(0, 2) + ') ' + d.slice(2);
+      if (d.length > 6) out = '(' + d.slice(0, 2) + ') ' + d.slice(2, d.length - 4) + '-' + d.slice(-4);
+      phone.value = out;
+    });
+    var notes = document.getElementById('c-notes'), nc = document.getElementById('notes-count');
+    function countNotes() { var n = notes.value.length; nc.textContent = n >= 800 ? n + ' / 1.000' : ''; }
+    notes.addEventListener('input', countNotes); countNotes();
+    var err = document.getElementById('form-error');
+    if (err) err.scrollIntoView({ block: 'start' });
+    if (/[?&]msg=/.test(location.search) && history.replaceState) history.replaceState(null, '', location.pathname);
+  })();
+</script>
+{% endblock %}

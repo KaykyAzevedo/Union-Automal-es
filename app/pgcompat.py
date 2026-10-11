@@ -15,7 +15,7 @@ import re
 import psycopg
 
 # tabelas com PK `id` serial (lastrowid via RETURNING id)
-ID_TABLES = {"cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "users"}
+ID_TABLES = {"cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "users", "customers"}
 _INSERT_RE = re.compile(r"^\s*INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
 
 

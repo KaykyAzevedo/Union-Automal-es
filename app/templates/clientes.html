@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{# F16: clientes + aniversários. ctx: view {today, week, month, all, counts}, q, msg. Tudo tolerante (ausente = vazio). #}
+{% set v = view if (view is defined and view) else {} %}
+{% set today_list = v.today if (v.today is defined and v.today) else [] %}
+{% set week_list = v.week if (v.week is defined and v.week) else [] %}
+{% set month_list = v.month if (v.month is defined and v.month) else [] %}
+{% set all_list = v.all if (v.all is defined and v.all) else [] %}
+{% set counts = v.counts if (v.counts is defined and v.counts) else {} %}
+{% set total = counts.total if (counts.total is defined and counts.total) else (all_list | length) %}
+{% set query = q if (q is defined and q) else '' %}
+{% set m = msg if (msg is defined and msg) else none %}
+{% block title %}Clientes{% endblock %}
+{% block body_class %}page-clientes{% endblock %}
+
+{# "faz 40 anos" quando o ano de nascimento é conhecido #}
+{% macro turning(c) -%}
+  {%- if c.age_turning is defined and c.age_turning is not none %}faz {{ c.age_turning }} ano{{ 's' if c.age_turning != 1 }}{% endif -%}
+{%- endmacro %}
+{% macro in_days(c) -%}
+  {%- set d = c.days_until if (c.days_until is defined and c.days_until is not none) else none -%}
+  {%- if d is none %}{% elif d == 0 %}hoje{% elif d == 1 %}amanhã{% else %}em {{ d }} dias{% endif -%}
+{%- endmacro %}
+{# telefone clicável: abre a conversa no WhatsApp (ou liga, se não houver link) #}
+{% macro phone_link(c, cls='') -%}
+  {%- set shown = c.phone_display if (c.phone_display is defined and c.phone_display) else c.phone -%}
+  {%- if shown -%}
+  <a class="{{ cls }}" href="{{ c.wa_chat_link if (c.wa_chat_link is defined and c.wa_chat_link) else ('tel:+55' ~ c.phone) }}"
+     {% if c.wa_chat_link is defined and c.wa_chat_link %}target="_blank" rel="noopener"{% endif %} title="Abrir conversa no WhatsApp">📱 {{ shown }}</a>
+  {%- endif -%}
+{%- endmacro %}
+{# linha compacta dos próximos aniversários #}
+{% macro soon_row(c) %}
+<li class="soon-row">
+  <span class="soon-date">{{ c.birthday_label }}</span>
+  <span class="soon-info">
+    <a class="soon-name" href="/equipe/clientes/{{ c.id }}">{{ c.name }}</a>
+    <span class="muted small">{{ in_days(c) }}{% if turning(c) %} · {{ turning(c) }}{% endif %}{% if c.car_text %} · {{ c.car_text }}{% endif %}</span>
+  </span>
+  {{ phone_link(c, 'soon-phone') }}
+</li>
+{% endmacro %}
+
+{% block content %}
+{% set team_tab = 'clientes' %}
+{% include "partials/team_tabs.html" %}
+
+<section class="page-head">
+  <div>
+    <h1>Clientes</h1>
+    <p class="muted">Cadastre quem comprou na loja para mandar parabéns no aniversário.</p>
+  </div>
+  <a href="/equipe/clientes/novo" class="btn btn-primary btn-lg new-customer-top">+ Novo cliente</a>
+</section>
+
+{% if m == 'saved' %}
+<div class="flash" role="status"><span>✓ Salvo.</span></div>
+{% elif m == 'deleted' %}
+<div class="flash" role="status"><span>✓ Cliente excluído.</span></div>
+{% elif m %}
+<div class="flash flash-error" role="alert"><span>⚠ Não deu para concluir. Tente de novo.</span></div>
+{% endif %}
+
+{# ---------- aniversariantes de hoje ---------- #}
+<section class="section bday-today" aria-labelledby="bday-today-title">
+  <div class="section-head">
+    <h2 id="bday-today-title">🎂 Aniversariantes de hoje</h2>
+    {% if today_list %}<span class="pill pill-warn">{{ today_list | length }}</span>{% endif %}
+  </div>
+  {% if today_list %}
+  <ul class="bday-list">
+    {% for c in today_list %}
+    <li class="card bday-card {{ 'is-greeted' if c.greeted }}" id="cliente-{{ c.id }}">
+      <div class="bday-head">
+        <a class="bday-name" href="/equipe/clientes/{{ c.id }}">{{ c.name }}</a>
+        <span class="muted">{% if turning(c) %}{{ turning(c) }} hoje{% else %}aniversário hoje{% endif %}</span>
+      </div>
+      {% if c.car_text %}<p class="bday-car">🚗 {{ c.car_text }}</p>{% endif %}
+      {% if c.notes %}<p class="bday-notes muted small">{{ c.notes }}</p>{% endif %}
+
+      {% if c.greeted %}
+      <div class="bday-sent">
+        <span class="bday-sent-label">✅ Enviado{% if c.greeted_by_name %} por {{ c.greeted_by_name }}{% endif %}</span>
+        <form method="post" action="/equipe/clientes/{{ c.id }}/parabens" data-loading-text="…">
+          <input type="hidden" name="value" value="0">
+          <button type="submit" class="btn btn-outline btn-sm">Desfazer</button>
+        </form>
+      </div>
+      {% if c.wa_link %}<a class="bday-again small" href="{{ c.wa_link }}" target="_blank" rel="noopener">Abrir o WhatsApp de novo</a>{% endif %}
+      {% else %}
+      {% if c.wa_link %}
+      <a class="btn btn-wa btn-block" href="{{ c.wa_link }}" target="_blank" rel="noopener" data-wa>💬 Dar parabéns no WhatsApp</a>
+      <p class="muted small bday-help">Abre o seu WhatsApp com a mensagem pronta. É só conferir e enviar.</p>
+      {% endif %}
+      <form method="post" action="/equipe/clientes/{{ c.id }}/parabens" data-loading-text="Salvando…">
+        <input type="hidden" name="value" value="1">
+        <button type="submit" class="btn btn-ghost btn-block bday-mark">Marcar como enviado</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="card empty-soft">
+    <p><strong>Ninguém faz aniversário hoje.</strong></p>
+    <p class="muted small">Quando um cliente cadastrado fizer aniversário, ele aparece aqui com um botão para mandar parabéns pelo WhatsApp.</p>
+  </div>
+  {% endif %}
+</section>
+
+{# ---------- próximos 7 dias ---------- #}
+<section class="section" aria-labelledby="bday-week-title">
+  <div class="section-head">
+    <h2 id="bday-week-title">Próximos 7 dias</h2>
+    {% if week_list %}<span class="pill">{{ week_list | length }}</span>{% endif %}
+  </div>
+  {% if week_list %}
+  <ul class="card soon-list">{% for c in week_list %}{{ soon_row(c) }}{% endfor %}</ul>
+  {% else %}
+  <p class="muted empty-line">Nenhum aniversário nos próximos 7 dias.</p>
+  {% endif %}
+</section>
+
+{# ---------- ainda este mês (só aparece se houver) ---------- #}
+{% if month_list %}
+<section class="section" aria-labelledby="bday-month-title">
+  <div class="section-head">
+    <h2 id="bday-month-title">Ainda este mês</h2>
+    <span class="pill">{{ month_list | length }}</span>
+  </div>
+  <ul class="card soon-list">{% for c in month_list %}{{ soon_row(c) }}{% endfor %}</ul>
+</section>
+{% endif %}
+
+{# ---------- todos os clientes ---------- #}
+<section class="section" aria-labelledby="all-title" id="todos">
+  <div class="section-head">
+    <h2 id="all-title">Todos os clientes</h2>
+    <span class="pill" id="all-count">{{ all_list | length if query else total }}</span>
+  </div>
+
+  {% if total or query %}
+  {# a busca filtra na própria tela enquanto digita (o que foi digitado não sai do aparelho) #}
+  <form class="customer-search" id="customer-search" method="get" action="/equipe/clientes" role="search">
+    <input class="input" type="search" name="q" id="customer-q" value="{{ query }}" maxlength="80" autocomplete="off"
+           placeholder="Buscar por nome, telefone ou carro" aria-label="Buscar cliente por nome, telefone ou carro">
+    <button type="submit" class="btn btn-ghost" id="customer-search-btn">Buscar</button>
+  </form>
+  {% if query %}<p class="small search-info">Mostrando só o que combina com a busca. <a href="/equipe/clientes#todos">Ver todos</a></p>{% endif %}
+  {% endif %}
+
+  {% if all_list %}
+  <ul class="customer-list" id="customer-list">
+    {% for c in all_list %}
+    <li class="card customer-card" data-search="{{ c.name }} {{ c.phone }} {{ c.phone_display }} {{ c.car_text or '' }}">
+      <div class="customer-main">
+        <a class="customer-name" href="/equipe/clientes/{{ c.id }}">{{ c.name }}</a>
+        <span class="customer-bday" title="Aniversário">🎂 {{ c.birthday_label }}</span>
+      </div>
+      {% if c.car_text %}<p class="customer-car">🚗 {{ c.car_text }}</p>{% endif %}
+      <div class="customer-foot">
+        {{ phone_link(c, 'customer-phone') }}
+        <a class="customer-edit" href="/equipe/clientes/{{ c.id }}">Ver / editar ›</a>
+      </div>
+      {% if c.created_by_name %}<p class="muted small customer-by">Cadastrado por {{ c.created_by_name }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="muted empty-line" id="customer-none" hidden>Nenhum cliente combina com a busca. Confira se digitou certo.</p>
+  {% elif query %}
+  <div class="card empty-soft">
+    <p><strong>Nenhum cliente combina com a busca.</strong></p>
+    <p class="muted small">Confira se digitou certo ou <a href="/equipe/clientes#todos">veja todos os clientes</a>.</p>
+  </div>
+  {% else %}
+  <div class="card empty-soft">
+    <p><strong>Nenhum cliente cadastrado ainda.</strong></p>
+    <p class="muted small">Toque em <strong>+ Novo cliente</strong> e preencha nome, WhatsApp e a data de aniversário. Leva menos de um minuto.</p>
+    <a href="/equipe/clientes/novo" class="btn btn-primary btn-block btn-lg">+ Cadastrar o primeiro cliente</a>
+  </div>
+  {% endif %}
+</section>
+
+{# botão fixo no celular #}
+<a href="/equipe/clientes/novo" class="fab-new" aria-label="Novo cliente">+ Novo cliente</a>
+
+<script>
+  (function () {
+    // depois de abrir o WhatsApp, destaca o "Marcar como enviado" daquele cliente
+    document.querySelectorAll('[data-wa]').forEach(function (a) {
+      a.addEventListener('click', function () {
+        var card = a.closest('.bday-card'), mark = card && card.querySelector('.bday-mark');
+        if (mark) { mark.classList.remove('btn-ghost'); mark.classList.add('btn-success'); mark.textContent = '✓ Já enviei — marcar como enviado'; }
+      });
+    });
+
+    // busca na própria tela, sem diferenciar maiúsculas e acentos
+    var form = document.getElementById('customer-search'), list = document.getElementById('customer-list');
+    if (form && list) {
+      var input = document.getElementById('customer-q'), none = document.getElementById('customer-none'), count = document.getElementById('all-count');
+      var cards = Array.prototype.slice.call(list.children);
+      function norm(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+      cards.forEach(function (li) { li._text = norm(li.dataset.search); li._digits = (li.dataset.search || '').replace(/\D/g, ''); });
+      function filter() {
+        var term = norm(input.value.trim()), digits = input.value.replace(/\D/g, ''), words = term.split(/\s+/).filter(Boolean), shown = 0;
+        cards.forEach(function (li) {
+          var ok = words.every(function (w) { return li._text.indexOf(w) >= 0; }) || (digits.length >= 3 && li._digits.indexOf(digits) >= 0);
+          li.hidden = !ok; if (ok) shown++;
+        });
+        none.hidden = shown > 0; count.textContent = shown;
+      }
+      {% if not query %}
+      // a lista inteira já está na tela: filtra aqui mesmo e não manda a busca para o endereço da página
+      document.getElementById('customer-search-btn').hidden = true;
+      form.classList.add('is-live');
+      input.addEventListener('input', filter);
+      form.addEventListener('submit', function (e) { e.preventDefault(); e.stopImmediatePropagation(); filter(); input.blur(); }, true);
+      {% endif %}
+    }
+    // tira ?msg= da URL para o aviso não reaparecer ao recarregar a página
+    if (/[?&]msg=/.test(location.search) && history.replaceState) {
+      var keep = location.search.replace(/([?&])msg=[^&]*&?/, '$1').replace(/[?&]$/, '');
+      history.replaceState(null, '', location.pathname + keep + location.hash);
+    }
+  })();
+</script>
+{% endblock %}

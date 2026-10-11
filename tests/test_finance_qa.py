@@ -39,6 +39,16 @@ STAFF_ROUTES = {
     ("GET", "/equipe/senha"),    # F15
     ("POST", "/equipe/senha"),   # F15
 }
+# F16: clientes (sem cadastro neste arquivo: /1 responde 404 e o POST vazio 422, mas a equipe alcança)
+CUSTOMER_ROUTES = {
+    ("GET", "/equipe/clientes"),
+    ("GET", "/equipe/clientes/novo"),
+    ("GET", "/equipe/clientes/1"),
+    ("POST", "/equipe/clientes"),
+    ("POST", "/equipe/clientes/1"),
+    ("POST", "/equipe/clientes/1/parabens"),
+    ("POST", "/equipe/clientes/1/excluir"),
+}
 PUBLIC = {"/login", "/logout", "/health", "/favicon.ico"}
 FINANCE_POSTS = ("custo", "venda", "despesas", "despesas/1/excluir")
 
@@ -136,7 +146,7 @@ def test_equipe_routes_are_exactly_the_contract():
     """Rota nova sob /equipe/* nasce liberada para a equipe (prefixo no middleware): este
     teste obriga a revisar a lista quando alguém adicionar uma."""
     equipe = {(m, p) for m, p in all_routes() if p == "/equipe" or p.startswith("/equipe/")}
-    assert equipe == STAFF_ROUTES
+    assert equipe == STAFF_ROUTES | CUSTOMER_ROUTES
 
 
 def test_staff_reaches_only_team_area(staff, site, two_cars, conn):
@@ -152,7 +162,7 @@ def test_staff_reaches_only_team_area(staff, site, two_cars, conn):
             assert r.status_code in (200, 303), (method, path, r.status_code)
             assert not r.headers.get("location", "").startswith("/login")
     # F15: na senha única não há senha própria para trocar: GET /equipe/senha devolve para /equipe
-    assert reached == STAFF_ROUTES - {("GET", "/equipe/senha")}
+    assert reached == (STAFF_ROUTES | CUSTOMER_ROUTES) - {("GET", "/equipe/senha")}
     assert len(blocked) >= 12 and ("POST", "/admin/check-now") in blocked and ("GET", "/") in blocked
     assert site.calls == 0
 

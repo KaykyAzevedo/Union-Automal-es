@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from . import db
 from .services import queries
 from .services.formatting import brl, dt
-from .services import aging, finance, jobs, users
+from .services import aging, customers, finance, jobs, users
 from .services.jobs import daily_job, poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
@@ -87,7 +87,13 @@ def dashboard(request: Request, msg: str | None = None, conn=Depends(db.get_conn
          dependencies=[Depends(require_role(auth.ADMIN, auth.STAFF))])
 def equipe(request: Request, conn=Depends(db.get_conn)):
     """Painel da Equipe (admin e staff): tempo em estoque e sugestões de redução. Só leitura."""
-    return templates.TemplateResponse(request, "equipe.html", aging.team_view(conn))
+    return templates.TemplateResponse(request, "equipe.html", _with_birthdays(conn, aging.team_view(conn)))
+
+
+def _with_birthdays(conn, ctx: dict) -> dict:
+    """F16: `birthdays_today` (int) para o selo da aba Clientes na área da equipe."""
+    ctx["birthdays_today"] = customers.birthdays_today(conn, db.now().date())
+    return ctx
 
 
 # ---- F13: vendas e financeiro (admin e equipe; tudo sob /equipe/*) ----------------
@@ -99,7 +105,7 @@ FINANCE_MSGS = {"saved", "invalid"}
 @app.get("/equipe/vendas", response_class=HTMLResponse, dependencies=TEAM)
 def equipe_vendas(request: Request, mes: str | None = None, conn=Depends(db.get_conn)):
     """Vendas do mês (?mes=YYYY-MM, default mês atual): faturamento, gasto, lucro e marcas."""
-    return templates.TemplateResponse(request, "vendas.html", finance.sales_view(conn, mes))
+    return templates.TemplateResponse(request, "vendas.html", _with_birthdays(conn, finance.sales_view(conn, mes)))
 
 
 @app.get("/equipe/carro/{car_id}", response_class=HTMLResponse, dependencies=TEAM)
@@ -108,7 +114,7 @@ def equipe_carro(request: Request, car_id: int, msg: str | None = None, conn=Dep
     if ctx is None:
         raise HTTPException(404, "Carro não encontrado")
     ctx["msg"] = msg if msg in FINANCE_MSGS else None
-    return templates.TemplateResponse(request, "carro_financeiro.html", ctx)
+    return templates.TemplateResponse(request, "carro_financeiro.html", _with_birthdays(conn, ctx))
 
 
 def _finance_saved(conn, car_id: int, save) -> RedirectResponse:
@@ -143,6 +149,117 @@ def equipe_carro_despesa(car_id: int, description: str = Form(""), amount: str =
 @app.post("/equipe/carro/{car_id}/despesas/{expense_id}/excluir", dependencies=TEAM)
 def equipe_carro_despesa_excluir(car_id: int, expense_id: int, conn=Depends(db.get_conn)):
     return _finance_saved(conn, car_id, lambda c, i: finance.delete_expense(c, i, expense_id))
+
+
+# ---- F16: clientes e aniversários (admin e equipe; tudo sob /equipe/clientes*) ------
+# Regras em app/services/customers.py. Dados de cliente são pessoais: NUNCA em log, em URL
+# (por isso o erro do formulário é re-renderizado, sem redirect) nem em mensagem de erro.
+
+CUSTOMER_LIST_MSGS = {"saved", "deleted", "invalid"}
+CUSTOMER_FORM_MSGS = {"invalid", "duplicate"}
+CUSTOMER_FIELDS = ("name", "phone", "birthday", "birth_day", "birth_month", "birth_year", "email", "car_text",
+                   "purchase_date", "notes")
+MAX_SEARCH = 80
+NO_STORE = {"Cache-Control": "no-store"}
+
+
+def _actor(request: Request) -> tuple[int | None, str, str | None]:
+    """(users.id, nome para "cadastrado por"/"enviado por", nome que assina a mensagem) de quem está logado."""
+    user = auth.current_user(request)
+    if user is not None:
+        return user["id"], user["name"], user["name"]
+    return None, "Administrador" if auth.current_role(request) == auth.ADMIN else "Equipe", None
+
+
+def _customer_or_404(conn, customer_id: int) -> dict:
+    customer = customers.get_customer(conn, customer_id) if finance.valid_id(customer_id) else None
+    if customer is None:
+        raise HTTPException(404, "Cliente não encontrado")
+    return customer
+
+
+def _customer_form(request: Request, conn, customer: dict | None, msg: str | None = None,
+                   form: dict | None = None, status: int = 200):
+    """`customer` = cadastro gravado (None no novo). POST recusado: `form` traz o texto digitado, e
+    `customer` vira esse mesmo texto nas chaves do cadastro (customers.draft), para a tela não perder nada."""
+    return templates.TemplateResponse(request, "cliente_form.html", {
+        "customer": customer if form is None else customers.draft(form, customer["id"] if customer else None),
+        "form": form,
+        "msg": msg if msg in CUSTOMER_FORM_MSGS else None,
+        "can_delete": customer is not None and customers.can_delete(
+            customer, auth.current_role(request), auth.current_user(request)),
+        "birthdays_today": customers.birthdays_today(conn, db.now().date()),
+    }, status_code=status, headers=NO_STORE)
+
+
+async def _customer_fields(request: Request) -> dict:
+    data = await request.form()
+    return {field: value if isinstance(value := data.get(field, ""), str) else "" for field in CUSTOMER_FIELDS}
+
+
+@app.get("/equipe/clientes", response_class=HTMLResponse, dependencies=TEAM)
+def equipe_clientes(request: Request, q: str | None = None, msg: str | None = None, conn=Depends(db.get_conn)):
+    """Aniversariantes (hoje, próximos 7 dias, resto do mês) e a lista de clientes, com busca ?q=."""
+    q = (q or "").strip()[:MAX_SEARCH] or None
+    today = db.now().date()
+    view = customers.customers_view(conn, today, q, _actor(request)[2])
+    return templates.TemplateResponse(request, "clientes.html", {
+        "view": view,
+        "q": q or "",
+        "msg": msg if msg in CUSTOMER_LIST_MSGS else None,
+        "birthdays_today": customers.birthdays_today(conn, today),
+    }, headers=NO_STORE)
+
+
+@app.get("/equipe/clientes/novo", response_class=HTMLResponse, dependencies=TEAM)
+def equipe_cliente_novo(request: Request, conn=Depends(db.get_conn)):
+    return _customer_form(request, conn, None)
+
+
+@app.get("/equipe/clientes/{customer_id}", response_class=HTMLResponse, dependencies=TEAM)
+def equipe_cliente(request: Request, customer_id: int, conn=Depends(db.get_conn)):
+    return _customer_form(request, conn, _customer_or_404(conn, customer_id))
+
+
+@app.post("/equipe/clientes", dependencies=TEAM)
+async def equipe_cliente_criar(request: Request, conn=Depends(db.get_conn)):
+    form = await _customer_fields(request)
+    created_by, created_by_name, _ = _actor(request)
+    result = customers.create_customer(conn, form, created_by, created_by_name)
+    if result == "saved":
+        return RedirectResponse("/equipe/clientes?msg=saved", status_code=303)
+    return _customer_form(request, conn, None, "duplicate" if result == "duplicate" else "invalid", form, 422)
+
+
+@app.post("/equipe/clientes/{customer_id}", dependencies=TEAM)
+async def equipe_cliente_editar(request: Request, customer_id: int, conn=Depends(db.get_conn)):
+    customer = _customer_or_404(conn, customer_id)
+    form = await _customer_fields(request)
+    result = customers.update_customer(conn, customer_id, form)
+    if result == "saved":
+        return RedirectResponse("/equipe/clientes?msg=saved", status_code=303)
+    return _customer_form(request, conn, customer, "duplicate" if result == "duplicate" else "invalid", form, 422)
+
+
+@app.post("/equipe/clientes/{customer_id}/parabens", dependencies=TEAM)
+def equipe_cliente_parabens(request: Request, customer_id: int, value: str = Form(""), conn=Depends(db.get_conn)):
+    """value='1' registra "parabéns enviado" neste aniversário (com o nome de quem enviou); '0' desfaz.
+    Só dá para marcar no dia do aniversário (página aberta ontem e clicada hoje → msg=invalid, nada gravado)."""
+    _customer_or_404(conn, customer_id)
+    if value not in ("0", "1"):
+        return RedirectResponse("/equipe/clientes?msg=invalid", status_code=303)
+    ok = customers.mark_greeted(conn, customer_id, _actor(request)[1], db.now().date(), value == "1")
+    return RedirectResponse(f"/equipe/clientes?msg={'saved' if ok else 'invalid'}", status_code=303)
+
+
+@app.post("/equipe/clientes/{customer_id}/excluir", dependencies=TEAM)
+def equipe_cliente_excluir(request: Request, customer_id: int, conn=Depends(db.get_conn)):
+    """Só o admin ou quem cadastrou o cliente pode excluir."""
+    customer = _customer_or_404(conn, customer_id)
+    if not customers.can_delete(customer, auth.current_role(request), auth.current_user(request)):
+        raise HTTPException(403, "Só o administrador ou quem cadastrou pode excluir")
+    customers.delete_customer(conn, customer_id)
+    return RedirectResponse("/equipe/clientes?msg=deleted", status_code=303)
 
 
 # ---- F15: login individual por funcionário ----------------------------------------

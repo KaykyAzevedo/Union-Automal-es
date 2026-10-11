@@ -1,4 +1,4 @@
-{# Abas da área da equipe. Uso: {% set team_tab = 'estoque' | 'vendas' | 'senha' %}{% include "partials/team_tabs.html" %} #}
+{# Abas da área da equipe. Uso: {% set team_tab = 'estoque' | 'vendas' | 'clientes' | 'senha' %}{% include "partials/team_tabs.html" %} #}
 {# F15: saudação de quem entrou com login próprio. `current_user` ausente/None (admin ou senha única) = sem saudação. #}
 {% set cu = current_user if (current_user is defined and current_user) else none %}
 {% if cu %}
@@ -15,7 +15,11 @@
   </div>
 </div>
 {% endif %}
-<nav class="team-tabs" aria-label="Área da equipe">
+{# F16: aba Clientes com selo de aniversariantes do dia. `birthdays_today` ausente = sem selo (na própria tela de clientes vale view.counts.today). #}
+{% set bdays = birthdays_today if (birthdays_today is defined and birthdays_today) else (view.counts.today if (view is defined and view and view.counts is defined and view.counts and view.counts.today) else 0) %}
+<nav class="team-tabs" data-tabs="3" aria-label="Área da equipe">
   <a href="/equipe" class="{{ 'active' if team_tab == 'estoque' }}" {% if team_tab == 'estoque' %}aria-current="page"{% endif %}>🚗 Estoque</a>
   <a href="/equipe/vendas" class="{{ 'active' if team_tab == 'vendas' }}" {% if team_tab == 'vendas' %}aria-current="page"{% endif %}>💰 Vendas</a>
+  <a href="/equipe/clientes" class="{{ 'active' if team_tab == 'clientes' }}" {% if team_tab == 'clientes' %}aria-current="page"{% endif %}>👥 Clientes
+    {%- if bdays %}<span class="tab-badge" title="Aniversariantes de hoje"><span aria-hidden="true">🎂 {{ bdays }}</span><span class="sr-only"> — {{ bdays }} aniversariante{{ 's' if bdays != 1 }} hoje</span></span>{% endif %}</a>
 </nav>

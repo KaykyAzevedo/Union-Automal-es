@@ -38,9 +38,11 @@
         <a href="/editor" class="{{ 'active' if path.startswith('/editor') }}">Editor</a>
         {% endif %}
         {% set in_sales = path.startswith('/equipe/vendas') %}
-        <a href="/equipe" class="{{ 'active' if path.startswith('/equipe') and not in_sales }}">Equipe</a>
+        {% set in_customers = path.startswith('/equipe/clientes') %}
+        <a href="/equipe" class="{{ 'active' if path.startswith('/equipe') and not in_sales and not in_customers }}">Equipe</a>
         {% if not is_staff %}
         <a href="/equipe/vendas" class="{{ 'active' if in_sales }}">Vendas</a>
+        <a href="/equipe/clientes" class="{{ 'active' if in_customers }}">Clientes</a>
         {% if auth_enabled is defined and auth_enabled %}
         <a href="/admin/usuarios" class="{{ 'active' if path.startswith('/admin/usuarios') }}">Usuários</a>
         {% endif %}

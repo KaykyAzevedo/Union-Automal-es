@@ -21,7 +21,7 @@ TZ = ZoneInfo("America/Sao_Paulo")
 log = logging.getLogger(__name__)
 
 TABLES = ["cars", "price_history", "tickets", "price_alerts", "sold_alerts", "car_expenses", "runs", "detail_cache",
-          "users"]
+          "users", "customers"]
 
 # F15: funcionários criados sem senha (password_hash NULL): só entram depois que o admin gera a provisória
 SEED_USERS = [
@@ -130,6 +130,27 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TEXT NOT NULL,
     last_login    TEXT
 );
+
+CREATE TABLE IF NOT EXISTS customers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    phone           TEXT NOT NULL,           -- so digitos, com DDD, sem o 55
+    email           TEXT,
+    birth_day       INTEGER NOT NULL,
+    birth_month     INTEGER NOT NULL,
+    birth_year      INTEGER,                 -- ano e opcional
+    car_text        TEXT,                    -- carro comprado (texto livre)
+    purchase_date   TEXT,                    -- data da compra (ISO)
+    notes           TEXT,
+    created_by      INTEGER,                 -- users.id de quem cadastrou (NULL: admin ou senha unica)
+    created_by_name TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    greeted_year    INTEGER,                 -- ano do ultimo parabens enviado
+    greeted_by_name TEXT,
+    greeted_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_customers_birthday ON customers(birth_month, birth_day);
 """
 # Postgres: mesmo schema, só a PK autoincremento muda
 PG_SCHEMA = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
