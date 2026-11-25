@@ -489,6 +489,11 @@ def _png(detail, url: str, cover: bool, adj=None) -> bytes:
         raise HTTPException(502, f"Falha ao baixar/abrir a foto: {exc}") from exc
 
 
+def story_slug(detail) -> str:
+    """Nome do arquivo do Stories sem extensão: '<marca>-<modelo>-<ano>-stories'."""
+    return zip_filename(detail)[: -len(".zip")] + "-stories"
+
+
 def _story_urls(detail, photos: str | None) -> tuple[str, str]:
     """Stories: `photos` = exatamente 2 índices distintos (A = foto de cima, B = interior).
     Sem `photos`: 0,1 (anúncio com 1 foto só: 0,0)."""
@@ -570,10 +575,23 @@ def encarte_story(car_id: int, photos: str | None = None, price: str | None = No
     except (httpx.HTTPError, OSError) as exc:
         log.warning("502 stories fotos %s | %s: %s: %s", url_top, url_interior, type(exc).__name__, exc)
         raise HTTPException(502, f"Falha ao baixar/abrir a foto: {exc}") from exc
-    name = zip_filename(detail)[: -len(".zip")] + "-stories.png"
+    name = story_slug(detail) + ".png"
     return Response(data, media_type="image/png",
                     headers={"Cache-Control": "private, max-age=600",
                              "Content-Disposition": f'inline; filename="{name}"'})
+
+
+@app.get("/encarte/{car_id}/photos.json")
+def encarte_photos(car_id: int, conn=Depends(db.get_conn)):
+    """Fotos do anúncio para o lote de Stories (o navegador escolhe 2 por carro e pede story.png)."""
+    car = _car_or_404(conn, car_id)
+    detail = _detail_or_502(car, conn)
+    if not detail.photos:
+        raise HTTPException(422, "Anúncio sem fotos")
+    return JSONResponse(
+        {"car_id": car.id, "name": car.name, "slug": story_slug(detail), "photos": list(detail.photos),
+         "default_top": 0, "default_int": 1 if len(detail.photos) > 1 else 0},
+        headers={"Cache-Control": "private, max-age=300"})
 
 
 @app.get("/encarte/{car_id:int}.zip")

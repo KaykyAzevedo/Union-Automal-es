@@ -21,6 +21,18 @@
         <span>{% if sel %}Trocar carro{% else %}Escolha um carro{% endif %}</span>
         <span class="pill">{{ cars | length }}</span>
       </summary>
+      <div class="batch-tools">
+        <button type="button" class="btn btn-ghost btn-sm" id="batch-toggle" aria-pressed="false">☑ Stories em lote</button>
+        <div class="batch-controls" id="batch-controls" hidden>
+          <p class="muted small">Toque nos carros para marcar. Depois toque em <b>Gerar Stories</b>.</p>
+          <div class="batch-controls-row">
+            <button type="button" class="link-btn" id="batch-all">Selecionar todos</button>
+            <button type="button" class="link-btn" id="batch-clear">Limpar</button>
+            <span class="pill" id="batch-count">0 marcados</span>
+          </div>
+          <p class="batch-limit" id="batch-limit" role="status" hidden></p>
+        </div>
+      </div>
       <div class="picker-search">
         <input type="search" id="picker-filter" class="input" placeholder="Buscar por marca, modelo…" aria-label="Buscar carro">
       </div>
@@ -198,6 +210,34 @@
       </div>
     {% endif %}
   </section>
+</div>
+
+
+<div class="batch-bar" id="batch-bar" hidden>
+  <button type="button" class="btn btn-ghost" id="batch-exit">Sair</button>
+  <button type="button" class="btn btn-primary btn-lg" id="batch-go" disabled>Gerar Stories (0)</button>
+</div>
+
+<div class="batch-sheet" id="batch-sheet" role="dialog" aria-modal="true" aria-labelledby="batch-title" hidden>
+  <div class="batch-sheet-in">
+    <div class="batch-head">
+      <div>
+        <h2 id="batch-title">Stories em lote</h2>
+        <p class="muted small">Confira as fotos de cada carro: <b>cima</b> = frente do carro, <b>interior</b> = painel/bancos. O preço usado é o do site.</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="batch-close">✕ Voltar</button>
+    </div>
+    <ul class="batch-rows" id="batch-rows"></ul>
+    <div class="card batch-out">
+      <p class="batch-progress" id="batch-progress" role="status" aria-live="polite"></p>
+      <div class="batch-out-row">
+        <button type="button" class="btn btn-accent" id="batch-run">▶ Gerar Stories</button>
+        <button type="button" class="btn btn-primary" id="batch-share" hidden disabled>📲 Salvar / Compartilhar</button>
+        <button type="button" class="btn btn-primary" id="batch-zip" disabled>⬇ Baixar ZIP</button>
+      </div>
+      <p class="muted small" id="batch-note"></p>
+    </div>
+  </div>
 </div>
 
 <div class="loading-overlay" id="loading-overlay" hidden>
@@ -1011,6 +1051,12 @@
     frame.addEventListener('pointercancel', end);
 
     return {
+      // aplica um ajuste salvo ('z,cx,cy') sem disparar o servidor
+      setAdj: function (v) {
+        var a = String(v).split(',').map(parseFloat);
+        if (a.length !== 3 || a.some(isNaN)) return;
+        st.z = clamp(a[0], 1, 3); st.cx = clamp(a[1], 0, 1); st.cy = clamp(a[2], 0, 1); paint();
+      },
       // trocou a foto: zera o ajuste dessa posição
       setPhoto: function (url) {
         clearTimeout(commitTimer);
@@ -1041,6 +1087,18 @@
     var stStatus = document.getElementById('story-status');
     var single = siteOrder.length < 2;
     var topIdx = siteOrder[0], intIdx = single ? siteOrder[0] : siteOrder[1];
+    // escolha salva (compartilhada com o lote): {top, int, adj_top, adj_int}
+    var LS_KEY = 'story:' + cfg.carId, ADJ_RE = /^\d(\.\d+)?,\d(\.\d+)?,\d(\.\d+)?$/;
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { saved = {}; }
+    if (urlOf[saved.top] !== undefined && urlOf[saved.int] !== undefined && (single || saved.top !== saved.int)) {
+      topIdx = saved.top; intIdx = saved.int;
+    } else { saved = {}; }
+    function saveChoice() {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify({ top: topIdx, int: intIdx, adj_top: adjTopStr, adj_int: adjIntStr }));
+      } catch (e) {}
+    }
     var blob = null, objUrl = null, ctrl = null, tok = 0, sTimer = null;
     var adjTopStr = null, adjIntStr = null, prevTop = topIdx, prevInt = intIdx;
     var advTop = makeAdjuster(document.getElementById('adj-top'), {
@@ -1052,6 +1110,8 @@
       onCommit: function (v) { adjIntStr = v; changed(); }
     });
     advTop.setPhoto(urlOf[topIdx]); advInt.setPhoto(urlOf[intIdx]);
+    if (typeof saved.adj_top === 'string' && ADJ_RE.test(saved.adj_top)) { adjTopStr = saved.adj_top; advTop.setAdj(adjTopStr); }
+    if (typeof saved.adj_int === 'string' && ADJ_RE.test(saved.adj_int)) { adjIntStr = saved.adj_int; advInt.setAdj(adjIntStr); }
 
     function status(t, kind) { stStatus.textContent = t; stStatus.className = 'zip-status' + (kind ? ' is-' + kind : ''); }
     function setBtns() { var off = !blob; dlBtn.disabled = off; shBtn.disabled = off; }
@@ -1132,6 +1192,7 @@
       if (topIdx !== prevTop) { prevTop = topIdx; adjTopStr = null; advTop.setPhoto(urlOf[topIdx]); }
       if (intIdx !== prevInt) { prevInt = intIdx; adjIntStr = null; advInt.setPhoto(urlOf[intIdx]); }
       renderPick();
+      saveChoice();
       clearTimeout(sTimer);
       frame.className = 'story-frame is-loading';
       blob = null; setBtns();
@@ -1175,6 +1236,371 @@
     renderStrips();
     renderSlides();
   }
+})();
+</script>
+<script>
+(function () {
+  var MAX = 30, CONC = 2;
+  var list = document.querySelector('.picker-list');
+  var toggle = document.getElementById('batch-toggle');
+  if (!list || !toggle) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var picker = document.querySelector('.picker');
+  var controls = $('batch-controls'), countEl = $('batch-count'), limitEl = $('batch-limit');
+  var bar = $('batch-bar'), goBtn = $('batch-go'), sheet = $('batch-sheet'), rowsEl = $('batch-rows');
+  var runBtn = $('batch-run'), zipBtn = $('batch-zip'), shareBtn = $('batch-share');
+  var progress = $('batch-progress'), note = $('batch-note');
+
+  var CAN_SHARE = false;
+  try {
+    CAN_SHARE = !!(navigator.share && navigator.canShare &&
+      navigator.canShare({ files: [new File([new Blob(['x'], { type: 'image/png' })], 't.png', { type: 'image/png' })] }));
+  } catch (e) { CAN_SHARE = false; }
+  var IS_TOUCH = window.matchMedia('(max-width: 600px), (pointer: coarse)').matches;
+
+  // ---------- seleção ----------
+  var items = Array.prototype.slice.call(list.querySelectorAll('.picker-item'));
+  var names = {};
+  items.forEach(function (a) {
+    var m = /\/editor\/(\d+)/.exec(a.getAttribute('href') || '');
+    if (!m) return;
+    a.dataset.carId = m[1];
+    var n = a.querySelector('.picker-name'); names[m[1]] = n ? n.textContent.trim() : 'Carro ' + m[1];
+    var chk = document.createElement('span'); chk.className = 'picker-check'; chk.setAttribute('aria-hidden', 'true'); chk.textContent = '✓';
+    a.insertBefore(chk, a.firstChild);
+  });
+  var selected = [];   // ids, na ordem em que foram marcados
+  var on = false;
+
+  function showLimit(t) { limitEl.textContent = t || ''; limitEl.hidden = !t; }
+  function refresh() {
+    items.forEach(function (a) {
+      var on_ = selected.indexOf(a.dataset.carId) !== -1;
+      a.classList.toggle('is-picked', on_);
+      a.setAttribute('aria-pressed', on ? String(on_) : '');
+    });
+    var n = selected.length;
+    countEl.textContent = n + (n === 1 ? ' marcado' : ' marcados');
+    goBtn.textContent = 'Gerar Stories (' + n + ')';
+    goBtn.disabled = n === 0;
+  }
+  function setMode(v) {
+    on = v;
+    picker.classList.toggle('batch-on', on);
+    document.body.classList.toggle('batch-mode', on);
+    controls.hidden = !on; bar.hidden = !on;
+    toggle.setAttribute('aria-pressed', String(on));
+    toggle.textContent = on ? '✕ Sair do lote' : '☑ Stories em lote';
+    if (!on) { selected = []; showLimit(''); }
+    refresh();
+  }
+  function pick(id) {
+    var i = selected.indexOf(id);
+    if (i !== -1) { selected.splice(i, 1); showLimit(''); }
+    else if (selected.length >= MAX) { showLimit('Máximo de ' + MAX + ' carros por vez. Gere estes e depois faça outro lote.'); }
+    else { selected.push(id); showLimit(''); }
+    refresh();
+  }
+  // captura: no modo lote o toque marca o carro em vez de abrir o editor
+  list.addEventListener('click', function (e) {
+    if (!on) return;
+    var a = e.target.closest && e.target.closest('.picker-item');
+    if (!a || !a.dataset.carId) return;
+    e.preventDefault(); e.stopPropagation();
+    pick(a.dataset.carId);
+  }, true);
+  toggle.addEventListener('click', function () { setMode(!on); });
+  $('batch-exit').addEventListener('click', function () { setMode(false); });
+  $('batch-clear').addEventListener('click', function () { selected = []; showLimit(''); refresh(); });
+  $('batch-all').addEventListener('click', function () {
+    var cut = false;
+    items.forEach(function (a) {
+      if (!a.dataset.carId || a.closest('li').hidden || selected.indexOf(a.dataset.carId) !== -1) return;
+      if (selected.length >= MAX) { cut = true; return; }
+      selected.push(a.dataset.carId);
+    });
+    showLimit(cut ? 'Marquei só ' + MAX + ' (o máximo por vez). Gere estes e depois faça outro lote.' : '');
+    refresh();
+  });
+
+  // ---------- dados por carro ----------
+  var info = {};      // id -> {state:'loading'|'ok'|'error', err, photos, slug, top, int, adjTop, adjInt}
+  var results = {};   // id -> {key, blob}
+  var failed = {};    // id -> motivo
+  var running = false;
+  var ADJ_RE = /^\d(\.\d+)?,\d(\.\d+)?,\d(\.\d+)?$/;
+
+  function why(err) {
+    var m = err && err.message || '';
+    if (m.indexOf('HTTP 404') === 0) return 'anúncio não encontrado';
+    if (m.indexOf('HTTP 422') === 0) return 'o anúncio não tem fotos';
+    if (m.indexOf('HTTP 400') === 0) return 'combinação de fotos inválida';
+    if (m.indexOf('HTTP 502') === 0) return 'não deu para baixar as fotos do site agora';
+    if (m.indexOf('HTTP 401') === 0 || m.indexOf('HTTP 403') === 0) return 'sessão expirada: entre de novo';
+    return 'erro de conexão ou do servidor';
+  }
+  function saved(id) { try { return JSON.parse(localStorage.getItem('story:' + id)) || {}; } catch (e) { return {}; } }
+  function save(id) {
+    var d = info[id]; if (!d || d.state !== 'ok') return;
+    try { localStorage.setItem('story:' + id, JSON.stringify({ top: d.top, int: d.int, adj_top: d.adjTop, adj_int: d.adjInt })); } catch (e) {}
+  }
+  function fetchJson(url) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+  function loadInfo(id) {
+    info[id] = { state: 'loading' };
+    renderRow(id);
+    return fetchJson('/encarte/' + id + '/photos.json').then(function (j) {
+      var n = j.photos.length, sv = saved(id);
+      function ok(i) { return Number.isInteger(i) && i >= 0 && i < n; }
+      var top = ok(sv.top) ? sv.top : (j.default_top || 0);
+      var int = ok(sv.int) ? sv.int : (j.default_int || 0);
+      if (n > 1 && top === int) { top = j.default_top || 0; int = j.default_int || 1; }
+      var useAdj = ok(sv.top) && ok(sv.int) && sv.top === top && sv.int === int;
+      info[id] = { state: 'ok', photos: j.photos, slug: j.slug || ('carro-' + id), name: j.name || names[id], top: top, int: int,
+        adjTop: useAdj && ADJ_RE.test(sv.adj_top || '') ? sv.adj_top : null,
+        adjInt: useAdj && ADJ_RE.test(sv.adj_int || '') ? sv.adj_int : null, open: false };
+    }).catch(function (err) {
+      info[id] = { state: 'error', err: why(err) };
+    }).then(function () { renderRow(id); updateButtons(); });
+  }
+  function storyUrl(id) {
+    var d = info[id];
+    return '/encarte/' + id + '/story.png?photos=' + d.top + ',' + d.int +
+      (d.adjTop ? '&adj_top=' + d.adjTop : '') + (d.adjInt ? '&adj_int=' + d.adjInt : '');
+  }
+
+  // ---------- linhas da revisão ----------
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; }
+  function thumb(url, label) {
+    var f = el('figure', 'batch-thumb'), im = document.createElement('img');
+    im.src = url; im.alt = label; im.referrerPolicy = 'no-referrer'; im.loading = 'lazy'; im.draggable = false;
+    f.appendChild(im); f.appendChild(el('figcaption', '', label));
+    return f;
+  }
+  function strip(id, which, title) {
+    var d = info[id], wrap = el('div', 'batch-strip');
+    wrap.appendChild(el('p', 'batch-strip-title', title));
+    var ul = el('ul', 'story-thumbs');
+    d.photos.forEach(function (url, idx) {
+      var li = document.createElement('li'), b = document.createElement('button');
+      var cur = which === 'top' ? d.top : d.int;
+      b.type = 'button'; b.className = 'story-thumb' + (idx === cur ? ' is-on' : '');
+      b.setAttribute('aria-pressed', idx === cur ? 'true' : 'false'); b.setAttribute('aria-label', 'Foto ' + (idx + 1));
+      var im = document.createElement('img'); im.src = url; im.alt = ''; im.referrerPolicy = 'no-referrer'; im.loading = 'lazy'; im.draggable = false;
+      b.appendChild(im);
+      b.addEventListener('click', function () { choose(id, which, idx); });
+      li.appendChild(b); ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    return wrap;
+  }
+  function choose(id, which, idx) {
+    var d = info[id], multi = d.photos.length > 1;
+    if (which === 'top') {
+      if (idx === d.top) return;
+      if (multi && idx === d.int) { d.int = d.top; d.adjInt = null; }
+      d.top = idx; d.adjTop = null;
+    } else {
+      if (idx === d.int) return;
+      if (multi && idx === d.top) { d.top = d.int; d.adjTop = null; }
+      d.int = idx; d.adjInt = null;
+    }
+    save(id); renderRow(id); updateButtons();
+  }
+  function renderRow(id) {
+    var d = info[id], li = rowsEl.querySelector('[data-id="' + id + '"]');
+    if (!li) { li = el('li', 'card batch-row'); li.dataset.id = id; rowsEl.appendChild(li); }
+    li.innerHTML = '';
+    var head = el('div', 'batch-row-head');
+    head.appendChild(el('strong', 'batch-row-name', (d && d.name) || names[id]));
+    li.appendChild(head);
+    if (!d || d.state === 'loading') { li.appendChild(el('p', 'muted small', 'Buscando as fotos do anúncio…')); return; }
+    if (d.state === 'error') {
+      li.appendChild(el('p', 'batch-err', '⚠ Não consegui carregar as fotos: ' + d.err + '.'));
+      var rb = el('button', 'btn btn-sm btn-primary', '↻ Tentar de novo');
+      rb.type = 'button'; rb.addEventListener('click', function () { loadInfo(id); });
+      li.appendChild(rb); return;
+    }
+    var pair = el('div', 'batch-pair');
+    pair.appendChild(thumb(d.photos[d.top], 'Cima'));
+    pair.appendChild(thumb(d.photos[d.int], 'Interior'));
+    var side = el('div', 'batch-row-side');
+    var sw = el('button', 'btn btn-ghost btn-sm', d.open ? '✕ Fechar' : '⇄ Trocar fotos');
+    sw.type = 'button'; sw.addEventListener('click', function () { d.open = !d.open; renderRow(id); });
+    var ed = el('a', 'link-btn', 'Ajustar no editor ↗');
+    ed.href = '/editor/' + id; ed.target = '_blank'; ed.rel = 'noopener';
+    side.appendChild(sw); side.appendChild(ed);
+    if (d.adjTop || d.adjInt) side.appendChild(el('span', 'pill', 'enquadramento ajustado'));
+    pair.appendChild(side);
+    li.appendChild(pair);
+    if (d.open) {
+      li.appendChild(strip(id, 'top', '1 · Foto de cima (frente do carro)'));
+      li.appendChild(strip(id, 'int', '2 · Foto do interior'));
+    }
+    var st = el('p', 'batch-status');
+    if (results[id] && results[id].key === storyUrl(id)) { st.className += ' is-ok'; st.textContent = '✓ Stories pronto'; }
+    else if (failed[id]) {
+      st.className += ' is-err'; st.textContent = '⚠ Falhou: ' + failed[id] + '. ';
+      var rt = el('button', 'link-btn', 'Tentar de novo');
+      rt.type = 'button'; rt.addEventListener('click', function () { generate([id]); });
+      st.appendChild(rt);
+    }
+    li.appendChild(st);
+  }
+
+  // ---------- abrir / fechar ----------
+  function openSheet() {
+    if (!selected.length) return;
+    rowsEl.innerHTML = '';
+    selected.forEach(function (id) { renderRow(id); });
+    sheet.hidden = false; document.body.classList.add('batch-open');
+    sheet.scrollTop = 0;
+    var todo = selected.filter(function (id) { return !info[id] || info[id].state !== 'ok'; });
+    var next = 0;
+    function worker() {
+      if (next >= todo.length) return Promise.resolve();
+      return loadInfo(todo[next++]).then(worker);
+    }
+    worker(); worker(); worker();
+    progress.textContent = ''; note.textContent = '';
+    updateButtons();
+  }
+  function closeSheet() { if (running) return; sheet.hidden = true; document.body.classList.remove('batch-open'); }
+  goBtn.addEventListener('click', openSheet);
+  $('batch-close').addEventListener('click', closeSheet);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sheet.hidden) closeSheet(); });
+
+  // ---------- gerar ----------
+  function okRows() { return selected.filter(function (id) { return info[id] && info[id].state === 'ok'; }); }
+  function doneRows() { return okRows().filter(function (id) { return results[id] && results[id].key === storyUrl(id); }); }
+  function updateButtons() {
+    var done = doneRows().length;
+    var pendingN = okRows().length - done;
+    runBtn.disabled = running || okRows().length === 0;
+    runBtn.textContent = done && pendingN ? '▶ Gerar os que faltam (' + pendingN + ')' : (done ? '▶ Gerar de novo' : '▶ Gerar Stories (' + okRows().length + ')');
+    zipBtn.disabled = running || done === 0;
+    shareBtn.disabled = running || done === 0;
+    shareBtn.hidden = !IS_TOUCH;
+    if (IS_TOUCH && !CAN_SHARE) shareBtn.textContent = '⬇ Baixar imagens';
+  }
+  function fetchStory(id, tryN) {
+    return fetch(storyUrl(id), { credentials: 'same-origin', cache: tryN ? 'no-store' : 'default' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if ((r.headers.get('content-type') || '').indexOf('image/') !== 0) throw new Error('resposta inesperada');
+      return r.blob();
+    }).catch(function (err) {
+      var retryable = !err.message || err.message.indexOf('HTTP 502') === 0 || err.message.indexOf('HTTP') !== 0;
+      if (tryN < 1 && retryable) return new Promise(function (r) { setTimeout(r, 1200); }).then(function () { return fetchStory(id, tryN + 1); });
+      throw err;
+    });
+  }
+  function generate(ids) {
+    if (running) return;
+    ids = ids.filter(function (id) { return info[id] && info[id].state === 'ok' && !(results[id] && results[id].key === storyUrl(id)); });
+    if (!ids.length) { updateButtons(); return; }
+    running = true; updateButtons();
+    var total = ids.length, finished = 0, next = 0;
+    ids.forEach(function (id) { delete failed[id]; });
+    progress.className = 'batch-progress'; progress.textContent = 'Gerando 0/' + total + '…';
+    function worker() {
+      if (next >= ids.length) return Promise.resolve();
+      var id = ids[next++], key = storyUrl(id);
+      return fetchStory(id, 0).then(function (blob) {
+        results[id] = { key: key, blob: blob };
+      }, function (err) { failed[id] = why(err); }).then(function () {
+        finished++; progress.textContent = 'Gerando ' + finished + '/' + total + '…';
+        renderRow(id);
+        return worker();
+      });
+    }
+    var ws = []; for (var i = 0; i < Math.min(CONC, ids.length); i++) ws.push(worker());
+    Promise.all(ws).then(function () {
+      running = false;
+      var bad = ids.filter(function (id) { return failed[id]; });
+      var good = total - bad.length;
+      progress.className = 'batch-progress ' + (bad.length ? 'is-err' : 'is-ok');
+      progress.textContent = bad.length
+        ? good + ' prontos, ' + bad.length + ' com problema (veja acima). Os prontos já podem ser baixados.'
+        : '✓ ' + good + (good === 1 ? ' Stories pronto.' : ' Stories prontos.');
+      updateButtons();
+    });
+  }
+  runBtn.addEventListener('click', function () { generate(okRows()); });
+
+  // ---------- saída: ZIP e compartilhar ----------
+  function files() {
+    var used = {};
+    return doneRows().map(function (id) {
+      var base = info[id].slug, name = base, n = 2;
+      while (used[name]) name = base + '-' + (n++);
+      used[name] = 1;
+      return new File([results[id].blob], name + '.png', { type: 'image/png' });
+    });
+  }
+  function saveBlob(blob, name) {
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script'); s.src = src; s.async = true; s.onload = res;
+      s.onerror = function () { s.remove(); rej(new Error('não carregou ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadJSZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    return loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js')
+      .catch(function () { return loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'); })
+      .then(function () { if (!window.JSZip) throw new Error('biblioteca de ZIP indisponível'); return window.JSZip; });
+  }
+  function today() {
+    var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  zipBtn.addEventListener('click', function () {
+    var fs = files(); if (!fs.length) return;
+    zipBtn.disabled = true; note.textContent = 'Montando o ZIP…';
+    loadJSZip().then(function (JSZip) {
+      var zip = new JSZip();
+      fs.forEach(function (f) { zip.file(f.name, f); });
+      return zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    }).then(function (blob) {
+      var name = 'stories-' + today() + '.zip';
+      saveBlob(blob, name);
+      note.textContent = '✓ ' + name + ' baixado (' + fs.length + ' imagens, ' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB).';
+    }).catch(function (err) {
+      note.textContent = 'Não foi possível montar o ZIP: ' + (err && err.message || 'erro') + '. Tente "Baixar imagens" uma a uma.';
+    }).then(updateButtons);
+  });
+  function downloadAll(fs) {
+    var i = 0; zipBtn.disabled = shareBtn.disabled = true;
+    (function nextFile() {
+      if (i >= fs.length) { note.textContent = '✓ ' + fs.length + ' imagens baixadas.'; updateButtons(); return; }
+      note.textContent = 'Baixando ' + (i + 1) + '/' + fs.length + '…';
+      saveBlob(fs[i], fs[i].name); i++; setTimeout(nextFile, 450);
+    })();
+  }
+  shareBtn.addEventListener('click', function () {
+    var fs = files(); if (!fs.length) return;
+    var data = { files: fs, title: 'Stories ' + today() }, can = false;
+    try { can = CAN_SHARE && navigator.canShare(data); } catch (e) { can = false; }
+    if (!can) { downloadAll(fs); return; }
+    note.textContent = 'Escolha "Salvar imagens" para guardar na galeria…';
+    navigator.share(data).then(function () {
+      note.textContent = '✓ ' + fs.length + ' imagens enviadas. Agora é só postar nos Stories.';
+    }, function (err) {
+      if (err && err.name === 'AbortError') { note.textContent = 'Compartilhamento cancelado.'; return; }
+      downloadAll(fs);
+    });
+  });
+
+  refresh();
 })();
 </script>
 {% endblock %}

@@ -492,3 +492,62 @@ def test_seam_fade_is_short_and_direct():
     for y in range(box2[1], box1[3]):
         r, g, b = img.getpixel((540, y))
         assert g <= 40 and r + b <= 260   # mistura direta vermelho/azul: sem clarear para branco
+
+
+# --- F19: photos.json ------------------------------------------------------------
+
+def test_photos_json_ok(client, cars, scrape, photo_fetch):
+    cid = cars["5575766"]
+    d = detail("5575766")
+    r = client.get(f"/encarte/{cid}/photos.json")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.headers["cache-control"] == "private, max-age=300"
+    j = r.json()
+    assert set(j) == {"car_id", "name", "slug", "photos", "default_top", "default_int"}
+    assert j["car_id"] == cid and j["photos"] == d.photos and j["name"]
+    assert (j["default_top"], j["default_int"]) == (0, 1)
+    assert photo_fetch.calls == []                     # só lista URLs: nada de baixar foto
+
+
+def test_photos_json_slug_equals_story_filename(client, cars, scrape, photo_fetch):
+    cid = cars["5575766"]
+    slug = client.get(f"/encarte/{cid}/photos.json").json()["slug"]
+    cd = client.get(f"/encarte/{cid}/story.png").headers["content-disposition"]
+    assert cd == f'inline; filename="{slug}.png"' and slug.endswith("-stories")
+
+
+def test_photos_json_reuses_detail_cache(client, cars, scrape, photo_fetch):
+    cid = cars["5575766"]
+    client.get(f"/encarte/{cid}/photos.json")
+    client.get(f"/encarte/{cid}/photos.json")
+    client.get(f"/encarte/{cid}/story.png")
+    assert scrape["calls"] == 1
+
+
+def test_photos_json_single_photo_default_int_zero(client, cars, scrape, monkeypatch):
+    from dataclasses import replace
+    from app.encarte import source
+
+    real = source.get_detail
+    monkeypatch.setattr(source, "get_detail", lambda c, conn: replace(real(c, conn), photos=real(c, conn).photos[:1]))
+    j = client.get(f"/encarte/{cars['5575766']}/photos.json").json()
+    assert len(j["photos"]) == 1 and (j["default_top"], j["default_int"]) == (0, 0)
+
+
+def test_photos_json_404_422_502(client, cars, scrape):
+    from app.scraper import ScraperError
+
+    assert client.get("/encarte/9999/photos.json").status_code == 404
+    assert client.get(f"/encarte/{cars['5555997']}/photos.json").status_code == 422   # sem fotos
+    scrape["error"] = ScraperError("fora")
+    assert client.get(f"/encarte/{cars['5575766']}/photos.json").status_code == 502
+
+
+def test_photos_json_requires_login(client, cars, scrape, monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", "senha-de-teste-123")
+    monkeypatch.setenv("SESSION_SECRET", "segredo-de-sessao-" + "x" * 20)
+    r = client.get(f"/encarte/{cars['5575766']}/photos.json", follow_redirects=False)
+    assert r.status_code in (303, 401)
+    assert r.status_code != 303 or r.headers["location"].startswith("/login")
+    assert scrape["calls"] == 0
