@@ -3,3 +3,9 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+# saídas geradas do Stories (amostras/QA), regeneráveis
+tests/qa_stories/
+docs/referencia/stories/amostra_*.png
+docs/referencia/stories/calibracao.png
+docs/referencia/stories/foto*_vazia.png
+*.psd

@@ -44,6 +44,28 @@ FONTS: dict[str, FontStyle] = {
 }
 
 
+@dataclass(frozen=True)
+class StoryStyle:
+    """Estilo do Stories: Saira itálica (OFL, eixos wght/wdth) + alargamento horizontal extra."""
+    weight: int
+    width: int
+    stretch: float = 1.0
+
+
+# O molde do Stories é um itálico pesado e largo, de dígitos "retangulares arredondados" (0, 4, 5);
+# a Saira itálica bate com isso melhor que a Montserrat Black Italic (testada: 0 e 4 redondos, e muito
+# mais estreita que o molde). Larguras calibradas contra docs/referencia/stories/story_exemplo_gs3.png
+# (ver docs/referencia/stories/calibrar.py).
+STORY_FONTS: dict[str, StoryStyle] = {
+    "story_brand":   StoryStyle(weight=900, width=125, stretch=1.286),
+    "story_model":   StoryStyle(weight=900, width=125, stretch=1.385),
+    "story_value":   StoryStyle(weight=700, width=102, stretch=1.012),
+    "story_price":   StoryStyle(weight=800, width=98, stretch=1.034),
+    "story_cents":   StoryStyle(weight=800, width=111, stretch=1.023),
+    "story_version": StoryStyle(weight=500, width=109, stretch=1.02),
+}
+
+
 def _lakes_files() -> list[Path]:
     if not FONT_DIR.is_dir():
         return []
@@ -67,6 +89,8 @@ def _pick_lakes(style: FontStyle) -> Path | None:
 @lru_cache(maxsize=64)
 def get_font(style_name: str, size: int) -> tuple[ImageFont.FreeTypeFont, bool, float]:
     """Retorna (fonte, precisa_inclinar, alargamento_horizontal)."""
+    if style_name in STORY_FONTS:
+        return _story_font(style_name, size)
     style = FONTS[style_name]
     lakes = _pick_lakes(style)
     if lakes is not None:
@@ -77,6 +101,16 @@ def get_font(style_name: str, size: int) -> tuple[ImageFont.FreeTypeFont, bool, 
         font.set_variation_by_axes([style.weight, style.width])  # ordem dos eixos da Saira: wght, wdth
         return font, style.italic and path != DEFAULT_ITALIC, style.stretch
     return ImageFont.load_default(size), style.italic, style.stretch
+
+
+def _story_font(style_name: str, size: int) -> tuple[ImageFont.FreeTypeFont, bool, float]:
+    style = STORY_FONTS[style_name]
+    path = DEFAULT_ITALIC if DEFAULT_ITALIC.exists() else DEFAULT_UPRIGHT
+    if path.exists():
+        font = ImageFont.truetype(str(path), size)
+        font.set_variation_by_axes([style.weight, style.width])  # ordem dos eixos da Saira: wght, wdth
+        return font, path == DEFAULT_UPRIGHT, style.stretch
+    return ImageFont.load_default(size), True, style.stretch
 
 
 def font_source() -> str:

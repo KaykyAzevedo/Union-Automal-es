@@ -54,7 +54,7 @@ def _base(name: str) -> Image.Image:
     return Image.open(ASSETS / name).convert("RGB")
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def _badge(name: str, box: tuple[int, int, int, int]) -> tuple[Image.Image, tuple[int, int]]:
     """Selo RGBA sem a borda transparente, redimensionado (LANCZOS) para caber na caixa."""
     img = Image.open(ASSETS / name).convert("RGBA")
@@ -90,6 +90,21 @@ def _paste_badges(img: Image.Image, detail) -> Image.Image:
         badge, pos = _badge(name, box)
         out.alpha_composite(badge, pos)
     return out.convert("RGB")
+
+
+# Ajuste manual de enquadramento: (zoom, cx, cy) com a semântica de cover_fit(zoom, centering).
+Adj = tuple  # (z, cx, cy)
+ADJ_ZOOM_RANGE = (1.0, 3.0)
+COVER_DEFAULT_ADJ = (COVER_ZOOM, *COVER_CENTERING)
+STORY_DEFAULT_ADJ = (1.0, 0.5, 0.5)
+
+
+def norm_adj(adj, default: tuple) -> tuple:
+    """Ajuste normalizado (floats arredondados) para usar no render e na chave de cache; None -> padrão."""
+    if adj is None:
+        return tuple(default)
+    z, cx, cy = adj
+    return (round(float(z), 3), round(float(cx), 3), round(float(cy), 3))
 
 
 def cover_fit(photo: Image.Image, size: tuple[int, int], zoom: float = 1.0,
@@ -228,10 +243,11 @@ def fmt_price(price_cents: int | None) -> str | None:
 
 # ---- slides -----------------------------------------------------------------
 
-def render_cover(detail, photo: Image.Image) -> Image.Image:
+def render_cover(detail, photo: Image.Image, adj=None) -> Image.Image:
     img = _base("capa_base.png").copy()
     x0, y0, x1, y1 = COVER_PHOTO_BOX
-    img.paste(cover_fit(photo, (x1 - x0, y1 - y0), COVER_ZOOM, COVER_CENTERING), (x0, y0), _chamfer_mask())
+    z, cx, cy = norm_adj(adj, COVER_DEFAULT_ADJ)
+    img.paste(cover_fit(photo, (x1 - x0, y1 - y0), z, (cx, cy)), (x0, y0), _chamfer_mask())
 
     _draw(img, fmt_brand(detail.brand), **BRAND)
     _draw(img, (detail.model or "").upper(), **MODEL)
@@ -280,19 +296,20 @@ _SLIDE_CACHE_MAX = 40
 _slide_lock = threading.Lock()
 
 
-def slide_png(detail, url: str, cover: bool) -> bytes:
-    """PNG de um slide (capa se `cover`), com cache LRU em memória."""
+def slide_png(detail, url: str, cover: bool, adj=None) -> bytes:
+    """PNG de um slide (capa se `cover`), com cache LRU em memória. `adj` = (z, cx, cy) só na capa."""
     from .photos import load_photo
 
+    adj = norm_adj(adj, COVER_DEFAULT_ADJ)
     key = (url, cover) + ((detail.brand, detail.model, detail.version, detail.year_fab, detail.year_model,
-                           detail.km, detail.price_cents, bool(getattr(detail, "armored", False)))
+                           detail.km, detail.price_cents, bool(getattr(detail, "armored", False)), adj)
                           if cover else ())
     with _slide_lock:
         if key in _SLIDE_CACHE:
             _SLIDE_CACHE.move_to_end(key)
             return _SLIDE_CACHE[key]
     photo = load_photo(url)
-    data = to_png(render_cover(detail, photo) if cover else render_photo(photo))
+    data = to_png(render_cover(detail, photo, adj) if cover else render_photo(photo))
     with _slide_lock:
         _SLIDE_CACHE[key] = data
         while len(_SLIDE_CACHE) > _SLIDE_CACHE_MAX:
@@ -303,3 +320,258 @@ def slide_png(detail, url: str, cover: bool) -> bytes:
 def build_post(detail, photo_urls: list[str]) -> list[bytes]:
     """PNGs do post: capa (1ª foto) + uma imagem por foto seguinte."""
     return [slide_png(detail, url, i == 0) for i, url in enumerate(photo_urls)]
+
+
+# ---- Stories (Instagram 9:16, 1080x1920) ---------------------------------------
+# Camadas geradas por docs/referencia/stories/build_assets.py a partir do molde
+# docs/referencia/stories/story_exemplo_gs3.png (941x1672, escalado para 1080x1920).
+# Posições medidas por pixel nesse molde escalado. Textos ancorados na LINHA DE BASE
+# (cap = altura da caixa-alta em px), para encolher sem subir/descer.
+STORY_SIZE = (1080, 1920)
+STORY_MIN_SHRINK = 0.45  # encolhe até esta fração do tamanho do molde; depois abrevia com "…"
+STORY_MIN_SHRINK_BY_STYLE = {"story_brand": 0.2}  # marca nunca é abreviada: piso bem menor
+
+STORY_BRAND = dict(style="story_brand", cap=65, baseline=1385, left=98, max_w=442,
+                   gradient=((232, 10, 16), (105, 0, 2)))
+STORY_MODEL = dict(style="story_model", cap=87, baseline=1476, left=131, max_w=409, color=(20, 20, 23))
+STORY_MODEL_2L = dict(cap=36, gap=10, min_shrink=0.5)  # modelo longo em 2 linhas (antes de encolher/abreviar)
+STORY_KM = dict(style="story_value", cap=27, baseline=1402, left=779, max_w=261, color=(18, 18, 20))
+STORY_YEAR = dict(style="story_value", cap=27, baseline=1469, left=771, max_w=269, color=(18, 18, 20))
+STORY_VERSION = dict(style="story_version", cap=25, baseline=1682, center_x=540, max_w=812, color=(40, 38, 44))
+STORY_VERSION_LINE = dict(y=1668, thickness=4, x0=75, x1=1005, gap=19, color=(84, 83, 89), min_len=36)
+STORY_PRICE = dict(style="story_price", cap=88, baseline=1610, center_x=638, max_w=665, color=(255, 255, 255))
+STORY_CENTS = dict(style="story_cents", cap_ratio=0.489, raise_ratio=15 / 88, gap_ratio=14 / 88)
+STORY_CONSULT = dict(style="story_price", cap=76, baseline=1604, center_x=638, max_w=665, color=(255, 255, 255))
+
+
+@lru_cache(maxsize=1)
+def _story_layers() -> tuple:
+    fundo = Image.open(ASSETS / "story_fundo.png").convert("RGB")
+    frente = Image.open(ASSETS / "story_frente.png").convert("RGBA")
+    m1 = Image.open(ASSETS / "story_mascara1.png").convert("L")
+    m2 = Image.open(ASSETS / "story_mascara2.png").convert("L")
+    box = lambda m: m.point(lambda v: 255 if v > 8 else 0).getbbox()  # noqa: E731  (inclui a rampa da fusão)
+    return fundo, frente, m1, m2, box(m1), box(m2)
+
+
+def _ink(text: str, style: str, size: int) -> tuple[Image.Image, int, int]:
+    """(tinta recortada na horizontal, pad, altura da caixa-alta); topo da caixa-alta em y=pad."""
+    mask, pad = _text_mask(text, style, size)
+    box = mask.getbbox()
+    cap_px = round(_cap_ratio(style) * size)
+    if not box:
+        return Image.new("L", (1, mask.height), 0), pad, cap_px
+    return mask.crop((box[0], 0, box[2], mask.height)), pad, cap_px
+
+
+def _fit_story(text: str, style: str, cap: int, max_w: int, min_shrink: float | None = None) -> tuple[str, int]:
+    """Texto e tamanho de fonte: caixa-alta `cap`, encolhida até caber em `max_w`; se nem no
+    mínimo couber, abrevia por palavras com "…" (nunca invade a outra coluna)."""
+    size0 = max(8, round(cap / _cap_ratio(style)))
+    if min_shrink is None:
+        min_shrink = STORY_MIN_SHRINK_BY_STYLE.get(style, STORY_MIN_SHRINK)
+    min_size = max(8, round(size0 * min_shrink))
+    words = text.split()
+    while True:
+        for size in range(size0, min_size - 1, -1):
+            if _ink(text, style, size)[0].width <= max_w:
+                return text, size
+        if len(words) > 1:
+            words.pop()
+            text = " ".join(words) + "…"
+        elif len(text) > 2:  # palavra única enorme: corta caracteres
+            text = text.rstrip("…")[:-1] + "…"
+        else:
+            return text, min_size
+
+
+def _fits(text: str, style: str, cap: int, max_w: int, floor: float) -> int | None:
+    """Maior tamanho de fonte (cap -> até floor*cap) em que `text` cabe em `max_w`; None se não couber."""
+    size0 = max(8, round(cap / _cap_ratio(style)))
+    for size in range(size0, max(8, round(size0 * floor)) - 1, -1):
+        if _ink(text, style, size)[0].width <= max_w:
+            return size
+    return None
+
+
+def _story_model(img: Image.Image, text: str) -> None:
+    """Modelo em caixa alta, sempre dentro da coluna da esquerda. Ordem: 1 linha (encolhe até 60%);
+    2 linhas (melhor quebra de palavras); 1 linha menor (até 30%); só em caso extremo abrevia com "…"."""
+    M, L2 = STORY_MODEL, STORY_MODEL_2L
+    if not text:
+        return
+    if _fits(text, M["style"], M["cap"], M["max_w"], 0.6) is None:
+        words = text.split()
+        best = None
+        for i in range(1, len(words)):
+            a, b = " ".join(words[:i]), " ".join(words[i:])
+            sa = _fits(a, M["style"], L2["cap"], M["max_w"], L2["min_shrink"])
+            sb = _fits(b, M["style"], L2["cap"], M["max_w"], L2["min_shrink"])
+            if sa and sb and (best is None or min(sa, sb) > best[0]):
+                best = (min(sa, sb), a, b)
+        if best:
+            size, a, b = best
+            for line, base in ((b, M["baseline"]), (a, M["baseline"] - L2["cap"] - L2["gap"])):
+                ink, pad, cap_px = _ink(line, M["style"], size)
+                img.paste(Image.new("RGB", ink.size, M["color"]), (M["left"], base - cap_px - pad), ink)
+            return
+    _story_text(img, text, **{**M, "min_shrink": 0.3})
+
+
+def _story_brand(img: Image.Image, text: str) -> None:
+    """Marca nunca abreviada: encolhe até 20%; se ainda não couber, 2 linhas (hífen/espaço) na mesma faixa."""
+    B = STORY_BRAND
+    if not text:
+        return
+    if _fits(text, B["style"], B["cap"], B["max_w"], 0.2) is None:
+        parts = text.replace("-", "- ").split()
+        if len(parts) > 1:
+            best = None
+            for i in range(1, len(parts)):
+                a, b = "".join(parts[:i]) if parts[i - 1].endswith("-") else " ".join(parts[:i]), " ".join(parts[i:])
+                s1, s2 = (_fits(t, B["style"], 28, B["max_w"], 0.4) for t in (a, b))
+                if s1 and s2 and (best is None or min(s1, s2) > best[0]):
+                    best = (min(s1, s2), a, b)
+            if best:
+                size, a, b = best
+                for line, base in ((b, B["baseline"]), (a, B["baseline"] - 28 - 6)):
+                    ink, pad, cap_px = _ink(line, B["style"], size)
+                    img.paste(_gradient(ink.size, *B["gradient"]), (B["left"], base - cap_px - pad), ink)
+                return
+    _story_text(img, text, **B)
+
+
+def _gradient(size: tuple[int, int], top, bottom) -> Image.Image:
+    w, h = size
+    t = Image.linear_gradient("L").resize((w, h), Image.Resampling.BILINEAR)  # 0 (topo) -> 255 (base)
+    return Image.composite(Image.new("RGB", size, bottom), Image.new("RGB", size, top), t)
+
+
+def _story_text(img: Image.Image, text: str, *, style: str, cap: int, baseline: int, max_w: int,
+                color=None, gradient=None, left: int | None = None, center_x: int | None = None,
+                min_shrink: float | None = None, **_) -> None:
+    if not text:
+        return
+    text, size = _fit_story(text, style, cap, max_w, min_shrink)
+    ink, pad, cap_px = _ink(text, style, size)
+    x = left if left is not None else round(center_x - ink.width / 2)
+    fill = _gradient(ink.size, *gradient) if gradient else Image.new("RGB", ink.size, color)
+    img.paste(fill, (x, baseline - cap_px - pad), ink)
+
+
+def _story_price(img: Image.Image, price: str | None) -> None:
+    if price is None:
+        _story_text(img, "CONSULTE", **STORY_CONSULT)
+        return
+    P, C = STORY_PRICE, STORY_CENTS
+    for cap in range(P["cap"], 20, -2):  # encolhe o grupo "154.900," + "00" até caber
+        size = max(8, round(cap / _cap_ratio(P["style"])))
+        csize = max(8, round(cap * C["cap_ratio"] / _cap_ratio(C["style"])))
+        big, bpad, bcap = _ink(price + ",", P["style"], size)
+        cents, cpad, ccap = _ink("00", C["style"], csize)
+        gap = round(cap * C["gap_ratio"])
+        total = big.width + gap + cents.width
+        if total <= P["max_w"]:
+            break
+    x = round(P["center_x"] - total / 2)
+    img.paste(Image.new("RGB", big.size, P["color"]), (x, P["baseline"] - bcap - bpad), big)
+    cb = P["baseline"] - round(cap * C["raise_ratio"])
+    img.paste(Image.new("RGB", cents.size, P["color"]), (x + big.width + gap, cb - ccap - cpad), cents)
+
+
+def _story_version(img: Image.Image, version: str) -> None:
+    V, L = STORY_VERSION, STORY_VERSION_LINE
+    text, size = _fit_story(version, V["style"], V["cap"], V["max_w"])
+    ink, pad, cap_px = _ink(text, V["style"], size)
+    x = round(V["center_x"] - ink.width / 2)
+    img.paste(Image.new("RGB", ink.size, V["color"]), (x, V["baseline"] - cap_px - pad), ink)
+    # linhas dos lados acompanham a largura do texto (como no molde)
+    draw = ImageDraw.Draw(img)
+    for x0, x1 in ((L["x0"], x - L["gap"]), (x + ink.width + L["gap"], L["x1"])):
+        if x1 - x0 >= L["min_len"]:
+            draw.rectangle((x0, L["y"], x1 - 1, L["y"] + L["thickness"] - 1), fill=L["color"])
+
+
+def _story_badge_box(box: tuple[int, int, int, int], slot: tuple) -> tuple[int, int, int, int]:
+    """Caixa do selo do feed (relativa à moldura da capa) levada à foto de cima do Stories,
+    na mesma proporção em relação à largura da foto."""
+    fx0, fy0, fx1, fy1 = COVER_PHOTO_BOX
+    sx0, sy0, sx1, _ = slot
+    k = (sx1 - sx0) / (fx1 - fx0)
+    return tuple(round(v) for v in (sx0 + (box[0] - fx0) * k, sy0 + (box[1] - fy0) * k,
+                                    sx0 + (box[2] - fx0) * k, sy0 + (box[3] - fy0) * k))
+
+
+def _paste_story_badges(img: Image.Image, detail, slot: tuple) -> Image.Image:
+    badges = cover_badges(detail)  # mesma regra do feed: armored / km == 0
+    if not badges:
+        return img
+    out = img.convert("RGBA")
+    for name, box in badges:
+        badge, pos = _badge(name, _story_badge_box(box, slot))
+        out.alpha_composite(badge, pos)
+    return out.convert("RGB")
+
+
+def story_frames() -> dict:
+    """Caixas das fotos (px) e enquadramento padrão, para o editor montar a prévia local."""
+    _, _, _, _, box1, box2 = _story_layers()
+    cx0, cy0, cx1, cy1 = COVER_PHOTO_BOX
+
+    def frame(w, h, adj):
+        return {"w": w, "h": h, "z": adj[0], "cx": adj[1], "cy": adj[2]}
+
+    return {"story_top": frame(box1[2] - box1[0], box1[3] - box1[1], STORY_DEFAULT_ADJ),
+            "story_int": frame(box2[2] - box2[0], box2[3] - box2[1], STORY_DEFAULT_ADJ),
+            "cover": frame(cx1 - cx0, cy1 - cy0, COVER_DEFAULT_ADJ)}
+
+
+def render_story(detail, photo_top: Image.Image, photo_interior: Image.Image, adj_top=None, adj_int=None) -> Image.Image:
+    """Stories 1080x1920: foto 1 (frente) + foto 2 (interior) + marca/modelo/KM/ano/preço/versão.
+    As duas fotos se fundem em degradê e o topo da foto 1 some em degradê sob o cabeçalho (assets)."""
+    fundo, frente, m1, m2, box1, box2 = _story_layers()
+    img = fundo.copy()
+    for photo, mask, box, adj in ((photo_top, m1, box1, adj_top), (photo_interior, m2, box2, adj_int)):
+        x0, y0, x1, y1 = box
+        z, cx, cy = norm_adj(adj, STORY_DEFAULT_ADJ)
+        layer = Image.new("RGB", STORY_SIZE, (0, 0, 0))
+        layer.paste(cover_fit(photo, (x1 - x0, y1 - y0), z, (cx, cy)), (x0, y0))
+        img.paste(layer, (0, 0), mask)
+    img = Image.alpha_composite(img.convert("RGBA"), frente).convert("RGB")
+    img = _paste_story_badges(img, detail, box1)
+
+    _story_brand(img, fmt_brand(detail.brand))
+    _story_model(img, " ".join((detail.model or "").upper().split()))
+    _story_text(img, f"KM: {fmt_km(detail.km)}", **STORY_KM)
+    _story_text(img, f"ANO: {fmt_years(detail.year_fab, detail.year_model)}", **STORY_YEAR)
+    _story_price(img, fmt_price(detail.price_cents))
+    version = " ".join((detail.version or "").upper().split())
+    if version:
+        _story_version(img, version)
+    return img
+
+
+_STORY_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_STORY_CACHE_MAX = 12  # ~3 MB por PNG
+_story_lock = threading.Lock()
+
+
+def story_png(detail, url_top: str, url_interior: str, adj_top=None, adj_int=None) -> bytes:
+    """PNG do Stories, com cache LRU em memória (chave: fotos + textos que entram na arte)."""
+    from .photos import load_photo
+
+    adj_top, adj_int = norm_adj(adj_top, STORY_DEFAULT_ADJ), norm_adj(adj_int, STORY_DEFAULT_ADJ)
+    key = (url_top, url_interior, adj_top, adj_int, detail.brand, detail.model, detail.version, detail.year_fab,
+           detail.year_model, detail.km, detail.price_cents, tuple(n for n, _ in cover_badges(detail)))
+    with _story_lock:
+        if key in _STORY_CACHE:
+            _STORY_CACHE.move_to_end(key)
+            return _STORY_CACHE[key]
+    top = load_photo(url_top)
+    interior = top if url_interior == url_top else load_photo(url_interior)
+    data = to_png(render_story(detail, top, interior, adj_top, adj_int))
+    with _story_lock:
+        _STORY_CACHE[key] = data
+        while len(_STORY_CACHE) > _STORY_CACHE_MAX:
+            _STORY_CACHE.popitem(last=False)
+    return data

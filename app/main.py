@@ -24,7 +24,7 @@ from .services import aging, customers, finance, jobs, users
 from .services.jobs import daily_job, poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
-from .encarte.render import slide_png
+from .encarte.render import ADJ_ZOOM_RANGE, slide_png, story_frames, story_png
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("union")
@@ -462,14 +462,49 @@ def _with_price(detail, price: str | None):
     return detail if cents is None else replace(detail, price_cents=cents)
 
 
-def _png(detail, url: str, cover: bool) -> bytes:
+_ADJ_NUM = re.compile(r"[0-9]+(?:\.[0-9]{1,3})?")  # até 3 casas decimais
+
+
+def parse_adj(value: str | None, name: str = "adj") -> tuple[float, float, float] | None:
+    """Ajuste de enquadramento 'z,cx,cy' (z 1.00-3.00; cx,cy 0.00-1.00; só dígitos ASCII e ponto, até 3 casas).
+    Vazio/ausente -> None (enquadramento padrão); inválido -> 400."""
+    if value is None or not value.strip():
+        return None
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 3 or not all(_ADJ_NUM.fullmatch(p) for p in parts):
+        raise HTTPException(400, f"{name} inválido: use z,cx,cy, ex.: 1.25,0.50,0.40")
+    z, cx, cy = (float(p) for p in parts)
+    if not (ADJ_ZOOM_RANGE[0] <= z <= ADJ_ZOOM_RANGE[1] and 0.0 <= cx <= 1.0 and 0.0 <= cy <= 1.0):
+        raise HTTPException(400, f"{name} fora da faixa: z {ADJ_ZOOM_RANGE[0]}-{ADJ_ZOOM_RANGE[1]}, cx e cy 0-1")
+    return z, cx, cy
+
+
+def _png(detail, url: str, cover: bool, adj=None) -> bytes:
     import httpx
 
     try:
-        return slide_png(detail, url, cover)
+        return slide_png(detail, url, cover, adj if cover else None)
     except (httpx.HTTPError, OSError) as exc:
         log.warning("502 encarte foto %s (capa=%s): %s: %s", url, cover, type(exc).__name__, exc)
         raise HTTPException(502, f"Falha ao baixar/abrir a foto: {exc}") from exc
+
+
+def _story_urls(detail, photos: str | None) -> tuple[str, str]:
+    """Stories: `photos` = exatamente 2 índices distintos (A = foto de cima, B = interior).
+    Sem `photos`: 0,1 (anúncio com 1 foto só: 0,0)."""
+    if not detail.photos:
+        raise HTTPException(422, "Anúncio sem fotos")
+    if photos is None or not photos.strip():
+        return detail.photos[0], detail.photos[1 if len(detail.photos) > 1 else 0]
+    parts = [p.strip() for p in photos.split(",")]
+    if not all(p.isascii() and p.isdigit() for p in parts):  # só dígitos ASCII: nada de '1_0', vírgula sobrando, '٣'
+        raise HTTPException(400, "photos deve ser dois índices distintos, ex.: 0,3")
+    idx = [int(p) for p in parts]
+    n = len(detail.photos)
+    same_ok = n == 1 and idx == [0, 0]  # anúncio de 1 foto: o editor manda 0,0
+    if len(idx) != 2 or (idx[0] == idx[1] and not same_ok) or any(i >= n for i in idx):
+        raise HTTPException(400, f"photos deve ter 2 índices distintos (0..{n - 1}), ex.: 0,3")
+    return detail.photos[idx[0]], detail.photos[idx[1]]
 
 
 def _slug(text: str) -> str:
@@ -492,7 +527,7 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
     from .scraper import ScraperError
 
     car = _car_or_404(conn, car_id)
-    ctx = {"cars": queries.active_cars(conn), "selected": None, "car": car}
+    ctx = {"cars": queries.active_cars(conn), "selected": None, "car": car, "frames": story_frames()}
     try:
         detail = encarte_source.get_detail(car, conn)
     except ScraperError as exc:
@@ -510,25 +545,48 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
 
 @app.get("/encarte/{car_id}/slide/{n}.png")
 def encarte_slide(car_id: int, n: int, photos: str | None = None, price: str | None = None,
-                  conn=Depends(db.get_conn)):
+                  adj_cover: str | None = None, conn=Depends(db.get_conn)):
     parse_manual_price(price)  # 400 antes de raspar
+    adj = parse_adj(adj_cover, "adj_cover")
     detail = _with_price(_detail_or_502(_car_or_404(conn, car_id), conn), price)
     urls = _chosen_urls(detail, photos)
     if not 0 <= n < len(urls):
         raise HTTPException(404, "Slide inexistente")
-    return Response(_png(detail, urls[n], n == 0), media_type="image/png",
+    return Response(_png(detail, urls[n], n == 0, adj), media_type="image/png",
                     headers={"Cache-Control": "private, max-age=600"})
 
 
+@app.get("/encarte/{car_id}/story.png")
+def encarte_story(car_id: int, photos: str | None = None, price: str | None = None,
+                  adj_top: str | None = None, adj_int: str | None = None, conn=Depends(db.get_conn)):
+    import httpx
+
+    parse_manual_price(price)  # 400 antes de raspar
+    a_top, a_int = parse_adj(adj_top, "adj_top"), parse_adj(adj_int, "adj_int")
+    detail = _with_price(_detail_or_502(_car_or_404(conn, car_id), conn), price)
+    url_top, url_interior = _story_urls(detail, photos)
+    try:
+        data = story_png(detail, url_top, url_interior, a_top, a_int)
+    except (httpx.HTTPError, OSError) as exc:
+        log.warning("502 stories fotos %s | %s: %s: %s", url_top, url_interior, type(exc).__name__, exc)
+        raise HTTPException(502, f"Falha ao baixar/abrir a foto: {exc}") from exc
+    name = zip_filename(detail)[: -len(".zip")] + "-stories.png"
+    return Response(data, media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=600",
+                             "Content-Disposition": f'inline; filename="{name}"'})
+
+
 @app.get("/encarte/{car_id:int}.zip")
-def encarte_zip(car_id: int, photos: str | None = None, price: str | None = None, conn=Depends(db.get_conn)):
+def encarte_zip(car_id: int, photos: str | None = None, price: str | None = None,
+                adj_cover: str | None = None, conn=Depends(db.get_conn)):
     parse_manual_price(price)
+    adj = parse_adj(adj_cover, "adj_cover")
     detail = _with_price(_detail_or_502(_car_or_404(conn, car_id), conn), price)
     urls = _chosen_urls(detail, photos)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:  # PNG já é comprimido
         for i, url in enumerate(urls):
-            zf.writestr(f"{i + 1:02d}.png", _png(detail, url, i == 0))
+            zf.writestr(f"{i + 1:02d}.png", _png(detail, url, i == 0, adj))
         zf.writestr("legenda.txt", build_caption(detail).encode("utf-8"))
     name = zip_filename(detail)
     return Response(buf.getvalue(), media_type="application/zip",

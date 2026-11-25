@@ -179,6 +179,7 @@ main.container { flex: 1; padding-top: 24px; padding-bottom: 40px; }
 .actions form { margin: 0; }
 
 /* ---------- buttons ---------- */
+[hidden] { display: none !important; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 42px; padding: 0 16px; border-radius: var(--radius-sm);
@@ -1231,4 +1232,56 @@ details[open] > .picker-summary::after { content: "\25B4"; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---------- Stories (editor) ---------- */
+.story-layout { display: grid; gap: 16px; grid-template-columns: 1fr; }
+.story-pick { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.story-group-title { margin: 0 0 6px; font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.story-badge { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--brand-red); color: #fff; font-size: 12px; font-weight: 800; }
+.story-badge-b { background: #333; }
+.story-thumbs { list-style: none; margin: 0; padding: 2px 2px 6px; display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.story-thumbs li { flex: 0 0 auto; scroll-snap-align: start; }
+.story-thumb { display: block; padding: 0; width: 84px; height: 64px; border: 3px solid transparent; border-radius: var(--radius-sm, 8px); background: var(--surface-2, #eee); overflow: hidden; cursor: pointer; opacity: .75; }
+.story-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.story-thumb.is-on { border-color: var(--brand-red); opacity: 1; }
+.story-thumb:focus-visible { outline: 3px solid var(--brand-red); outline-offset: 2px; }
+.story-preview { display: flex; justify-content: center; }
+.story-frame { position: relative; width: min(100%, 260px); aspect-ratio: 9 / 16; border-radius: var(--radius-sm, 8px); background: var(--surface-2, #eee); overflow: hidden; border: 1px solid var(--border, #ddd); }
+.story-frame img { width: 100%; height: 100%; object-fit: contain; display: block; color: transparent; font-size: 0; }
+.story-loading, .story-fail { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px; text-align: center; font-size: 13px; background: var(--surface-2, rgba(255,255,255,.85)); }
+.story-frame.is-loading .story-loading { display: flex; }
+.story-frame.is-error .story-fail { display: flex; }
+.story-frame.is-loading img, .story-frame.is-error img { visibility: hidden; }
+.story-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.story-card .zip-status { max-width: none; margin: 0; text-align: right; }
+.story-card .zip-status:empty { display: none; }
+@media (min-width: 700px) {
+  .story-layout { grid-template-columns: 1fr 260px; align-items: start; }
+}
+@media (max-width: 600px) {
+  .story-thumb { width: 92px; height: 70px; }
+  .story-actions .btn { flex: 1; min-height: 46px; }
+  .story-card .zip-status { text-align: center; }
+}
+
+/* ---------- Ajuste de enquadramento ---------- */
+.adj-host { margin-top: 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.adj-host-cover { margin-top: 12px; }
+.adj-toggle.is-adjusted { border-color: var(--brand-red); color: var(--brand-red); }
+.adj { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 380px; }
+.adj[hidden] { display: none; }
+.adj-frame { position: relative; width: 100%; overflow: hidden; border-radius: var(--radius-sm, 8px); background: #222; border: 2px solid var(--brand-red); touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.adj-frame.is-portrait { max-width: 260px; }
+.adj-frame.is-grab { cursor: grabbing; }
+.adj-frame img { position: absolute; max-width: none; display: block; pointer-events: none; -webkit-user-drag: none; }
+.adj-controls { display: flex; align-items: center; gap: 8px; }
+.adj-step { min-width: 42px; font-size: 20px; line-height: 1; padding: 0; }
+.adj-range { flex: 1; min-width: 0; height: 32px; accent-color: var(--brand-red); }
+.adj-tip { margin: 0; }
+.adj-reset { align-self: flex-start; }
+@media (max-width: 600px) {
+  .adj-step { min-width: 46px; min-height: 46px; }
+  .adj { max-width: none; }
+  .adj-frame.is-portrait { max-width: 240px; }
 }

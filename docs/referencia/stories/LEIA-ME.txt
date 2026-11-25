@@ -1,0 +1,10 @@
+UNION VEICULOS - CAMADAS STORIES 9:16
+
+fundo.png: fundo base cinza/branco suave.
+frente.png: cabecalho UNION, transicao/degrade inferior, icones, labels fixos, R$, moldura de preco vazia e rodape de contatos.
+mascara_foto1.png / mascara_foto2.png: branco = area de encaixe da foto; preto = fora da area.
+referencia_camadas.psd: PSD raster com camadas de fundo, dois slots vazios de foto e frente.
+referencia_original.png: arte original achatada para consulta.
+
+Foram removidos os dados variaveis do veiculo: marca/modelo, valores de KM e ano, preco numerico e versao. As fotos tambem nao estao incluidas nas camadas de layout.
+Nota: como a origem era uma imagem achatada, as camadas foram reconstruidas; elementos rasterizados nao sao texto editavel.

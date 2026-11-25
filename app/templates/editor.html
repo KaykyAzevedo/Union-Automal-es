@@ -103,6 +103,7 @@
           <h2 class="section-title">Prévia <span class="muted small" id="preview-status"></span></h2>
         </div>
         <div class="slides" id="slides"></div>
+        <div class="adj-host adj-host-cover" id="adj-cover"></div>
       </div>
 
       {# preço do post: só a capa e a legenda mudam #}
@@ -131,6 +132,41 @@
         <p class="zip-status" id="zip-status" role="status" aria-live="polite"></p>
       </div>
 
+      {# Stories: 1080x1920, foto de cima + foto do interior #}
+      <div class="card panel story-card" id="story-card">
+        <div class="panel-head">
+          <h2 class="section-title">Stories <span class="pill">1080×1920</span></h2>
+        </div>
+        <p class="muted small">Monte o Stories do Instagram. Escolha qual foto fica <b>em cima</b> (a frente do carro) e qual fica <b>embaixo</b> (o interior). O app não consegue adivinhar qual é qual — escolha você.</p>
+        <div class="story-layout">
+          <div class="story-pick">
+            <div class="story-group">
+              <p class="story-group-title"><span class="story-badge">1</span> Foto de cima <span class="muted small">(frente do carro)</span></p>
+              <ul class="story-thumbs" id="story-top" role="group" aria-label="Foto de cima"></ul>
+              <div class="adj-host" id="adj-top"></div>
+            </div>
+            <div class="story-group">
+              <p class="story-group-title"><span class="story-badge story-badge-b">2</span> Foto do interior <span class="muted small">(painel, bancos)</span></p>
+              <ul class="story-thumbs" id="story-int" role="group" aria-label="Foto do interior"></ul>
+              <div class="adj-host" id="adj-int"></div>
+            </div>
+            <p class="muted small" id="story-hint"></p>
+          </div>
+          <div class="story-preview">
+            <div class="story-frame is-loading" id="story-frame">
+              <img id="story-img" alt="Prévia do Stories">
+              <div class="story-loading"><div class="spinner"></div><span>Montando o Stories…</span></div>
+              <div class="story-fail"><span id="story-err">Não foi possível montar o Stories.</span><button type="button" class="btn btn-sm btn-primary" id="story-retry">↻ Tentar de novo</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="story-actions">
+          <button type="button" class="btn btn-primary" id="story-share" hidden disabled>📲 Salvar / Compartilhar Stories</button>
+          <button type="button" class="btn btn-primary" id="story-dl" disabled>⬇ Baixar Stories</button>
+        </div>
+        <p class="zip-status" id="story-status" role="status" aria-live="polite"></p>
+      </div>
+
       {% endif %}
 
       {# legenda #}
@@ -150,6 +186,7 @@
           carId: {{ sel_id | tojson }},
           sitePrice: {{ site_reais | tojson if site_reais is defined else 'null' }},
           zipParts: [{{ (d.brand if d and d.brand else '') | tojson }}, {{ (d.model if d and d.model else sel.car.name) | tojson }}, {{ ((d.year_model or d.year_fab or '') if d else '') | tojson }}],
+          frames: {{ frames | tojson if frames is defined and frames else 'null' }},
           photos: [{% for p in sel.photos %}{"index": {{ p.index | int }}, "url": {{ p.url | tojson }}}{{ "," if not loop.last }}{% endfor %}]
         };
       </script>
@@ -224,9 +261,11 @@
   function qs() { return 'photos=' + chosen.join(','); }
   // Preço do post em reais inteiros; null = preço do site (não manda o parâmetro).
   var postPrice = null;
+  var adjCover = null;   // ajuste de enquadramento da capa ('z,cx,cy') ou null = padrão
+  function adjQs(name, v) { return v ? '&' + name + '=' + v : ''; }
   function priceQs() { return postPrice !== null && postPrice !== cfg.sitePrice ? '&price=' + postPrice : ''; }
   // só a capa (slide 0) leva o preço
-  function slideSrc(n, q) { return '/encarte/' + cfg.carId + '/slide/' + n + '.png?' + q + (n === 0 ? priceQs() : ''); }
+  function slideSrc(n, q) { return '/encarte/' + cfg.carId + '/slide/' + n + '.png?' + q + (n === 0 ? priceQs() + adjQs('adj_cover', adjCover) : ''); }
   function pad(n) { return (n < 9 ? '0' : '') + (n + 1); }
 
   function tile(idx, pos) {
@@ -463,6 +502,7 @@
   }
 
   function update() {
+    if (typeof syncCover === 'function') syncCover();
     renderStrips();
     clearTimeout(timer);
     status.textContent = 'atualizando…';
@@ -778,6 +818,8 @@
     applyPrice(true);
   });
 
+  document.addEventListener('coveradjchange', function () { refreshCover(); });
+
   function applyPrice(final) {
     var v = readPrice();
     if (v === null) {
@@ -803,6 +845,7 @@
     if (captionTxt) captionTxt.href = '/encarte/' + cfg.carId + '/caption.txt' + (priceQs() ? '?' + priceQs().slice(1) : '');
     refreshCover();
     refreshCaption();
+    document.dispatchEvent(new Event('postpricechange'));
   }
 
   // Refaz só a capa: as outras imagens (e os blobs já prontos) continuam valendo.
@@ -858,6 +901,273 @@
       updateCount();
     });
   }
+  })();
+
+  // ----- Ajuste de enquadramento (arrastar + zoom), prévia local instantânea -----
+  // Mesma semântica do servidor (cover_fit com zoom z e centro cx,cy): a foto cobre a caixa, é ampliada
+  // z vezes e cx/cy dizem qual ponto da sobra fica no centro. Só envia ao servidor quando a pessoa solta.
+  function frameOf(key, fb) {
+    var f = cfg.frames && cfg.frames[key] || {};
+    return { w: f.w || fb.w, h: f.h || fb.h, z: f.z || 1, cx: f.cx === undefined ? 0.5 : f.cx, cy: f.cy === undefined ? 0.5 : f.cy };
+  }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function makeAdjuster(host, o) {
+    var fr = o.frame, st = { z: fr.z, cx: fr.cx, cy: fr.cy }, nat = null, commitTimer = null;
+    var pointers = {}, gesture = null;
+
+    var toggle = document.createElement('button');
+    toggle.type = 'button'; toggle.className = 'btn btn-ghost btn-sm adj-toggle';
+    var panel = document.createElement('div');
+    panel.className = 'adj'; panel.hidden = true;
+    var frame = document.createElement('div');
+    frame.className = 'adj-frame' + (fr.h > fr.w ? ' is-portrait' : '');
+    frame.style.aspectRatio = fr.w + ' / ' + fr.h;
+    frame.setAttribute('role', 'img');
+    frame.setAttribute('aria-label', 'Enquadramento: arraste a foto para mover');
+    var im = document.createElement('img');
+    im.alt = ''; im.draggable = false; im.referrerPolicy = 'no-referrer';
+    frame.appendChild(im);
+    var ctr = document.createElement('div'); ctr.className = 'adj-controls';
+    function mk(label, title) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-ghost btn-sm adj-step';
+      b.textContent = label; b.title = title; b.setAttribute('aria-label', title); return b;
+    }
+    var minus = mk('−', 'Afastar'), plus = mk('+', 'Aproximar');
+    var range = document.createElement('input');
+    range.type = 'range'; range.min = '1'; range.max = '3'; range.step = '0.01'; range.className = 'adj-range';
+    range.setAttribute('aria-label', 'Zoom');
+    ctr.appendChild(minus); ctr.appendChild(range); ctr.appendChild(plus);
+    var reset = document.createElement('button');
+    reset.type = 'button'; reset.className = 'link-btn adj-reset'; reset.textContent = 'Voltar ao padrão';
+    var tip = document.createElement('p');
+    tip.className = 'muted small adj-tip';
+    tip.textContent = 'Arraste a foto para mover. Use o zoom (ou a pinça, no celular) para aproximar. O resultado final aparece na prévia depois que você solta.';
+    panel.appendChild(frame); panel.appendChild(ctr); panel.appendChild(reset); panel.appendChild(tip);
+    host.appendChild(toggle); host.appendChild(panel);
+
+    function isDefault() {
+      return Math.abs(st.z - fr.z) < 0.005 && Math.abs(st.cx - fr.cx) < 0.005 && Math.abs(st.cy - fr.cy) < 0.005;
+    }
+    function value() { return isDefault() ? null : st.z.toFixed(2) + ',' + st.cx.toFixed(3) + ',' + st.cy.toFixed(3); }
+    function label() {
+      toggle.textContent = (panel.hidden ? '✂ Ajustar enquadramento' : '✕ Fechar ajuste') + (!isDefault() ? ' · ajustado' : '');
+      toggle.classList.toggle('is-adjusted', !isDefault());
+      reset.hidden = isDefault();
+    }
+    function paint() {
+      var arI = nat ? nat.w / nat.h : fr.w / fr.h, arF = fr.w / fr.h;
+      var sw = Math.max(1, arI / arF) * st.z, sh = Math.max(1, arF / arI) * st.z;   // tamanho em frações da caixa
+      im.style.width = (sw * 100) + '%'; im.style.height = (sh * 100) + '%';
+      im.style.left = (-(sw - 1) * st.cx * 100) + '%'; im.style.top = (-(sh - 1) * st.cy * 100) + '%';
+      range.value = st.z;
+      label();
+    }
+    function commit() { clearTimeout(commitTimer); o.onCommit(value()); }
+    function commitSoon() { clearTimeout(commitTimer); commitTimer = setTimeout(commit, 400); }
+    function setZoom(z) { st.z = clamp(z, 1, 3); paint(); }
+
+    toggle.addEventListener('click', function () { panel.hidden = !panel.hidden; label(); });
+    range.addEventListener('input', function () { setZoom(parseFloat(range.value)); commitSoon(); });
+    minus.addEventListener('click', function () { setZoom(st.z - 0.1); commitSoon(); });
+    plus.addEventListener('click', function () { setZoom(st.z + 0.1); commitSoon(); });
+    reset.addEventListener('click', function () { st.z = fr.z; st.cx = fr.cx; st.cy = fr.cy; paint(); commit(); });
+    im.addEventListener('load', function () { nat = { w: im.naturalWidth, h: im.naturalHeight }; paint(); });
+
+    function ids() { return Object.keys(pointers); }
+    function startGesture() {
+      var k = ids(), r = frame.getBoundingClientRect();
+      var p0 = pointers[k[0]], p1 = pointers[k[1]];
+      gesture = { z: st.z, cx: st.cx, cy: st.cy, x: p0.x, y: p0.y, w: r.width, h: r.height,
+                  d: p1 ? Math.hypot(p1.x - p0.x, p1.y - p0.y) : 0 };
+    }
+    frame.addEventListener('pointerdown', function (e) {
+      pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+      try { frame.setPointerCapture(e.pointerId); } catch (err) {}
+      frame.classList.add('is-grab'); startGesture(); e.preventDefault();
+    });
+    frame.addEventListener('pointermove', function (e) {
+      if (!pointers[e.pointerId] || !gesture) return;
+      pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var k = ids(), p0 = pointers[k[0]], p1 = pointers[k[1]];
+      if (p1 && gesture.d > 0) {
+        st.z = clamp(gesture.z * Math.hypot(p1.x - p0.x, p1.y - p0.y) / gesture.d, 1, 3);
+      } else {
+        var arI = nat ? nat.w / nat.h : fr.w / fr.h, arF = fr.w / fr.h;
+        var sw = Math.max(1, arI / arF) * st.z, sh = Math.max(1, arF / arI) * st.z;
+        var dx = (p0.x - gesture.x) / gesture.w, dy = (p0.y - gesture.y) / gesture.h;
+        if (sw - 1 > 1e-4) st.cx = clamp(gesture.cx - dx / (sw - 1), 0, 1);
+        if (sh - 1 > 1e-4) st.cy = clamp(gesture.cy - dy / (sh - 1), 0, 1);
+      }
+      paint();
+    });
+    function end(e) {
+      if (!pointers[e.pointerId]) return;
+      delete pointers[e.pointerId];
+      if (ids().length) { startGesture(); return; }   // sobrou um dedo: continua arrastando dele
+      gesture = null; frame.classList.remove('is-grab'); commit();
+    }
+    frame.addEventListener('pointerup', end);
+    frame.addEventListener('pointercancel', end);
+
+    return {
+      // trocou a foto: zera o ajuste dessa posição
+      setPhoto: function (url) {
+        clearTimeout(commitTimer);
+        st.z = fr.z; st.cx = fr.cx; st.cy = fr.cy; nat = null;
+        im.src = url; paint();
+      }
+    };
+  }
+
+  // Capa do post do feed
+  var coverIdx = chosen[0];
+  var coverAdj = chosen.length ? makeAdjuster(document.getElementById('adj-cover'), {
+    frame: frameOf('cover', { w: 1080, h: 1350 }),
+    onCommit: function (v) { adjCover = v; document.dispatchEvent(new Event('coveradjchange')); }
+  }) : null;
+  if (coverAdj) coverAdj.setPhoto(urlOf[coverIdx]);
+  function syncCover() {
+    if (!coverAdj || chosen[0] === coverIdx) return;
+    coverIdx = chosen[0]; adjCover = null; coverAdj.setPhoto(urlOf[coverIdx]);
+  }
+
+  // ----- Stories (1080x1920): foto de cima + foto do interior -----
+  if (document.getElementById('story-card')) (function () {
+    var topEl = document.getElementById('story-top'), intEl = document.getElementById('story-int');
+    var frame = document.getElementById('story-frame'), img = document.getElementById('story-img');
+    var errEl = document.getElementById('story-err'), hint = document.getElementById('story-hint');
+    var dlBtn = document.getElementById('story-dl'), shBtn = document.getElementById('story-share');
+    var stStatus = document.getElementById('story-status');
+    var single = siteOrder.length < 2;
+    var topIdx = siteOrder[0], intIdx = single ? siteOrder[0] : siteOrder[1];
+    var blob = null, objUrl = null, ctrl = null, tok = 0, sTimer = null;
+    var adjTopStr = null, adjIntStr = null, prevTop = topIdx, prevInt = intIdx;
+    var advTop = makeAdjuster(document.getElementById('adj-top'), {
+      frame: frameOf('story_top', { w: 1080, h: 560 }),
+      onCommit: function (v) { adjTopStr = v; changed(); }
+    });
+    var advInt = makeAdjuster(document.getElementById('adj-int'), {
+      frame: frameOf('story_int', { w: 1080, h: 440 }),
+      onCommit: function (v) { adjIntStr = v; changed(); }
+    });
+    advTop.setPhoto(urlOf[topIdx]); advInt.setPhoto(urlOf[intIdx]);
+
+    function status(t, kind) { stStatus.textContent = t; stStatus.className = 'zip-status' + (kind ? ' is-' + kind : ''); }
+    function setBtns() { var off = !blob; dlBtn.disabled = off; shBtn.disabled = off; }
+
+    function thumbs(ul, current, onPick) {
+      ul.innerHTML = '';
+      siteOrder.forEach(function (idx) {
+        var li = document.createElement('li');
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'story-thumb' + (idx === current ? ' is-on' : '');
+        b.setAttribute('aria-pressed', idx === current ? 'true' : 'false');
+        b.setAttribute('aria-label', 'Foto ' + (idx + 1));
+        var im = document.createElement('img');
+        im.src = urlOf[idx]; im.alt = ''; im.loading = 'lazy'; im.referrerPolicy = 'no-referrer'; im.draggable = false;
+        b.appendChild(im);
+        b.addEventListener('click', function () { onPick(idx); });
+        li.appendChild(b); ul.appendChild(li);
+      });
+    }
+    function renderPick() {
+      thumbs(topEl, topIdx, function (i) {
+        if (i === intIdx && !single) intIdx = topIdx;   // não pode repetir: troca as duas
+        topIdx = i; changed();
+      });
+      thumbs(intEl, intIdx, function (i) {
+        if (i === topIdx && !single) topIdx = intIdx;
+        intIdx = i; changed();
+      });
+      hint.textContent = single
+        ? 'Este anúncio tem só 1 foto, então ela será usada nas duas posições.'
+        : 'Em cima: foto ' + (topIdx + 1) + ' · Interior: foto ' + (intIdx + 1) + '. Se escolher a mesma foto nas duas, elas trocam de lugar.';
+    }
+
+    function storyUrl(fresh) {
+      return '/encarte/' + cfg.carId + '/story.png?photos=' + topIdx + ',' + intIdx + priceQs() + adjQs('adj_top', adjTopStr) + adjQs('adj_int', adjIntStr) + (fresh ? '&_r=' + Date.now() : '');
+    }
+    function friendly(err) {
+      var m = err && err.message || '';
+      if (m.indexOf('HTTP 404') === 0) return 'Não encontrei este anúncio.';
+      if (m.indexOf('HTTP 422') === 0) return 'Este anúncio não tem fotos suficientes.';
+      if (m.indexOf('HTTP 400') === 0) {
+        if (/price|pre[çc]o/i.test(err.body || '')) return 'O preço digitado não vale. Use reais inteiros, ex.: 125900.';
+        return 'Combinação de fotos inválida. Escolha fotos diferentes.';
+      }
+      if (m.indexOf('HTTP 502') === 0) return 'Não consegui baixar as fotos do site agora.';
+      return 'Não foi possível montar o Stories.';
+    }
+    function load(fresh) {
+      var my = ++tok;
+      if (ctrl) ctrl.abort();
+      ctrl = newCtrl();
+      blob = null; setBtns(); status('');
+      frame.className = 'story-frame is-loading';
+      var opts = { cache: fresh ? 'no-store' : 'default', credentials: 'same-origin' };
+      if (ctrl) opts.signal = ctrl.signal;
+      fetch(storyUrl(fresh), opts).then(function (r) {
+        if (r.ok) {
+          if ((r.headers.get('content-type') || '').indexOf('image/') !== 0) throw new Error('resposta inesperada');
+          return r.blob();
+        }
+        return r.text().then(function (t) { var e = new Error('HTTP ' + r.status); e.body = t; throw e; });
+      }).then(function (b) {
+        if (my !== tok) return;
+        if (objUrl) URL.revokeObjectURL(objUrl);
+        blob = b; objUrl = URL.createObjectURL(b);
+        img.src = objUrl;
+        frame.className = 'story-frame';
+        setBtns();
+      }).catch(function (err) {
+        if (my !== tok || (err && err.name === 'AbortError')) return;
+        errEl.textContent = friendly(err);
+        frame.className = 'story-frame is-error';
+      });
+    }
+    function changed() {
+      // trocar a foto de uma posição zera o ajuste dela
+      if (topIdx !== prevTop) { prevTop = topIdx; adjTopStr = null; advTop.setPhoto(urlOf[topIdx]); }
+      if (intIdx !== prevInt) { prevInt = intIdx; adjIntStr = null; advInt.setPhoto(urlOf[intIdx]); }
+      renderPick();
+      clearTimeout(sTimer);
+      frame.className = 'story-frame is-loading';
+      blob = null; setBtns();
+      sTimer = setTimeout(function () { load(false); }, 350);
+    }
+
+    function fileName() { return baseName() + '-stories.png'; }
+    dlBtn.addEventListener('click', function () {
+      if (!blob) return;
+      saveBlob(blob, fileName());
+      status('✓ ' + fileName() + ' baixado.', 'ok');
+    });
+    if (IS_TOUCH) {
+      shBtn.hidden = false;
+      dlBtn.classList.remove('btn-primary'); dlBtn.classList.add('btn-ghost');
+      if (!CAN_SHARE_FILES) shBtn.textContent = '⬇ Baixar Stories';
+    }
+    shBtn.addEventListener('click', function () {
+      if (!blob) return;
+      var file = new File([blob], fileName(), { type: 'image/png' });
+      if (!CAN_SHARE_FILES || !navigator.canShare({ files: [file] })) {
+        saveBlob(blob, fileName()); status('✓ ' + fileName() + ' baixado.', 'ok'); return;
+      }
+      navigator.share({ files: [file], title: baseName() }).then(function () {
+        status('✓ Stories enviado. No Instagram, escolha “Stories”.', 'ok');
+      }, function (err) {
+        if (err && err.name === 'AbortError') { status('Compartilhamento cancelado.'); return; }
+        saveBlob(blob, fileName()); status('Não deu para compartilhar; baixei o arquivo.', 'ok');
+      });
+    });
+    document.getElementById('story-retry').addEventListener('click', function () { load(true); });
+    // preço do post mudou: refaz o Stories
+    document.addEventListener('postpricechange', function () { changed(); });
+
+    renderPick();
+    load(false);
   })();
 
   // Sem fotos: não há prévia nem ZIP (as rotas devolvem 422).
