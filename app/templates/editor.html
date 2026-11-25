@@ -1512,7 +1512,9 @@
       return fetchStory(id, 0).then(function (blob) {
         results[id] = { key: key, blob: blob };
       }, function (err) { failed[id] = why(err); }).then(function () {
-        finished++; progress.textContent = 'Gerando ' + finished + '/' + total + '…';
+        finished++;
+        var nf = ids.filter(function (x) { return failed[x]; }).length;
+        progress.textContent = 'Gerando ' + finished + '/' + total + '…' + (nf ? ' (' + nf + ' com problema)' : '');
         renderRow(id);
         return worker();
       });
@@ -1521,11 +1523,11 @@
     Promise.all(ws).then(function () {
       running = false;
       var bad = ids.filter(function (id) { return failed[id]; });
-      var good = total - bad.length;
+      var all = okRows().length, good = doneRows().length;
       progress.className = 'batch-progress ' + (bad.length ? 'is-err' : 'is-ok');
       progress.textContent = bad.length
-        ? good + ' prontos, ' + bad.length + ' com problema (veja acima). Os prontos já podem ser baixados.'
-        : '✓ ' + good + (good === 1 ? ' Stories pronto.' : ' Stories prontos.');
+        ? good + ' de ' + all + ' prontos, ' + bad.length + ' com problema (veja acima). Os prontos já podem ser baixados.'
+        : '✓ ' + good + ' de ' + all + (all === 1 ? ' Stories pronto.' : ' Stories prontos.');
       updateButtons();
     });
   }
@@ -1559,6 +1561,7 @@
       .catch(function () { return loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'); })
       .then(function () { if (!window.JSZip) throw new Error('biblioteca de ZIP indisponível'); return window.JSZip; });
   }
+  function imgs(n) { return n + (n === 1 ? ' imagem' : ' imagens'); }
   function today() {
     var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; };
     return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
@@ -1573,7 +1576,7 @@
     }).then(function (blob) {
       var name = 'stories-' + today() + '.zip';
       saveBlob(blob, name);
-      note.textContent = '✓ ' + name + ' baixado (' + fs.length + ' imagens, ' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB).';
+      note.textContent = '✓ ' + name + ' baixado (' + imgs(fs.length) + ', ' + (blob.size / 1048576).toFixed(1).replace('.', ',') + ' MB).';
     }).catch(function (err) {
       note.textContent = 'Não foi possível montar o ZIP: ' + (err && err.message || 'erro') + '. Tente "Baixar imagens" uma a uma.';
     }).then(updateButtons);
@@ -1581,7 +1584,7 @@
   function downloadAll(fs) {
     var i = 0; zipBtn.disabled = shareBtn.disabled = true;
     (function nextFile() {
-      if (i >= fs.length) { note.textContent = '✓ ' + fs.length + ' imagens baixadas.'; updateButtons(); return; }
+      if (i >= fs.length) { note.textContent = '✓ ' + imgs(fs.length) + (fs.length === 1 ? ' baixada.' : ' baixadas.'); updateButtons(); return; }
       note.textContent = 'Baixando ' + (i + 1) + '/' + fs.length + '…';
       saveBlob(fs[i], fs[i].name); i++; setTimeout(nextFile, 450);
     })();
@@ -1593,7 +1596,7 @@
     if (!can) { downloadAll(fs); return; }
     note.textContent = 'Escolha "Salvar imagens" para guardar na galeria…';
     navigator.share(data).then(function () {
-      note.textContent = '✓ ' + fs.length + ' imagens enviadas. Agora é só postar nos Stories.';
+      note.textContent = '✓ ' + imgs(fs.length) + (fs.length === 1 ? ' enviada.' : ' enviadas.') + ' Agora é só postar nos Stories.';
     }, function (err) {
       if (err && err.name === 'AbortError') { note.textContent = 'Compartilhamento cancelado.'; return; }
       downloadAll(fs);
