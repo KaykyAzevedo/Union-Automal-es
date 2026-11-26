@@ -15,6 +15,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from .fonts import get_font
+from .site_seal import url_has_zero_km_seal
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets" / "encarte"
 SIZE = (1080, 1350)
@@ -106,9 +107,22 @@ STORY_ARMORED_TOP_ADJ = (1.16, 0.5, 1.0)
 STORY_ARMORED_INT_ADJ = (1.0, 0.5, 1.0)
 
 
-def story_default_adj(armored: bool) -> tuple[tuple, tuple]:
-    """(padrão da foto de cima, padrão do interior) do Stories para o carro."""
-    return (STORY_ARMORED_TOP_ADJ, STORY_ARMORED_INT_ADJ) if armored else (STORY_DEFAULT_ADJ, STORY_DEFAULT_ADJ)
+# O selo "ZERO-KM" que o site cola em alguns anúncios fica dentro da área da marca "BLINDADO"
+# (x >= 0,904 e y <= 0,127), então o mesmo enquadramento o esconde.
+
+
+def story_hides_site_seal(detail) -> bool:
+    """O padrão do carro precisa esconder um selo do site: blindado, ou selo "ZERO-KM" detectado na
+    1ª foto do anúncio (independe do km e das fotos escolhidas)."""
+    if getattr(detail, "armored", False):
+        return True
+    urls = getattr(detail, "photos", None)
+    return bool(urls) and url_has_zero_km_seal(urls[0])
+
+
+def story_default_adj(hide_seal: bool) -> tuple[tuple, tuple]:
+    """(padrão da foto de cima, padrão do interior) do Stories; ver story_hides_site_seal."""
+    return (STORY_ARMORED_TOP_ADJ, STORY_ARMORED_INT_ADJ) if hide_seal else (STORY_DEFAULT_ADJ, STORY_DEFAULT_ADJ)
 
 
 def norm_adj(adj, default: tuple) -> tuple:
@@ -526,7 +540,7 @@ def _paste_story_badges(img: Image.Image, detail, slot: tuple) -> Image.Image:
     return out.convert("RGB")
 
 
-def story_frames(armored: bool = False) -> dict:
+def story_frames(hide_seal: bool = False) -> dict:
     """Caixas das fotos (px) e enquadramento padrão DO CARRO, para o editor montar a prévia local."""
     _, _, _, _, box1, box2 = _story_layers()
     cx0, cy0, cx1, cy1 = COVER_PHOTO_BOX
@@ -534,7 +548,7 @@ def story_frames(armored: bool = False) -> dict:
     def frame(w, h, adj):
         return {"w": w, "h": h, "z": adj[0], "cx": adj[1], "cy": adj[2]}
 
-    top_adj, int_adj = story_default_adj(armored)
+    top_adj, int_adj = story_default_adj(hide_seal)
     return {"story_top": frame(box1[2] - box1[0], box1[3] - box1[1], top_adj),
             "story_int": frame(box2[2] - box2[0], box2[3] - box2[1], int_adj),
             "cover": frame(cx1 - cx0, cy1 - cy0, COVER_DEFAULT_ADJ)}
@@ -545,7 +559,9 @@ def render_story(detail, photo_top: Image.Image, photo_interior: Image.Image, ad
     As duas fotos se fundem em degradê e o topo da foto 1 some em degradê sob o cabeçalho (assets)."""
     fundo, frente, m1, m2, box1, box2 = _story_layers()
     img = fundo.copy()
-    def_top, def_int = story_default_adj(bool(getattr(detail, "armored", False)))
+    def_top = def_int = STORY_DEFAULT_ADJ
+    if adj_top is None or adj_int is None:
+        def_top, def_int = story_default_adj(story_hides_site_seal(detail))
     for photo, mask, box, adj, default in ((photo_top, m1, box1, adj_top, def_top),
                                            (photo_interior, m2, box2, adj_int, def_int)):
         x0, y0, x1, y1 = box
@@ -576,7 +592,9 @@ def story_png(detail, url_top: str, url_interior: str, adj_top=None, adj_int=Non
     """PNG do Stories, com cache LRU em memória (chave: fotos + textos que entram na arte)."""
     from .photos import load_photo
 
-    def_top, def_int = story_default_adj(bool(getattr(detail, "armored", False)))
+    def_top = def_int = STORY_DEFAULT_ADJ
+    if adj_top is None or adj_int is None:  # com os dois ajustes manuais não há padrão a descobrir
+        def_top, def_int = story_default_adj(story_hides_site_seal(detail))
     adj_top, adj_int = norm_adj(adj_top, def_top), norm_adj(adj_int, def_int)
     key = (url_top, url_interior, adj_top, adj_int, detail.brand, detail.model, detail.version, detail.year_fab,
            detail.year_model, detail.km, detail.price_cents, tuple(n for n, _ in cover_badges(detail)))

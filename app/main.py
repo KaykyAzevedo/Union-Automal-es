@@ -24,7 +24,7 @@ from .services import aging, customers, finance, jobs, users
 from .services.jobs import daily_job, poll_job, price_check_job
 from .encarte import source as encarte_source
 from .encarte.caption import build_caption
-from .encarte.render import ADJ_ZOOM_RANGE, slide_png, story_frames, story_png
+from .encarte.render import ADJ_ZOOM_RANGE, slide_png, story_frames, story_hides_site_seal, story_png
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("union")
@@ -539,7 +539,7 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
         log.warning("editor car=%s: scrape_detail falhou: %s", car.id, exc)
         ctx["error"] = f"Não foi possível ler o anúncio no site: {exc}"
     else:
-        ctx["frames"] = story_frames(bool(getattr(detail, "armored", False)))  # padrão do Stories por carro
+        ctx["frames"] = story_frames(story_hides_site_seal(detail))  # padrão do Stories por carro
         ctx["selected"] = {
             "car": car,
             "detail": detail,
@@ -592,7 +592,7 @@ def encarte_photos(car_id: int, conn=Depends(db.get_conn)):
     return JSONResponse(
         {"car_id": car.id, "name": car.name, "slug": story_slug(detail), "photos": list(detail.photos),
          "default_top": 0, "default_int": 1 if len(detail.photos) > 1 else 0,
-         "frames": story_frames(bool(getattr(detail, "armored", False)))},
+         "frames": story_frames(story_hides_site_seal(detail))},
         headers={"Cache-Control": "private, max-age=300"})
 
 

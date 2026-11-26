@@ -46,6 +46,21 @@ def make_car(ext: str, name: str | None = None, price: int | None = 5_000_000,
     )
 
 
+@pytest.fixture(autouse=True)
+def seal_offline(monkeypatch):
+    """Detecção do selo do site sem rede e sem cache entre testes: por padrão a foto "não baixa"
+    (= sem selo). Quem testa a detecção substitui site_seal._load."""
+    from app.encarte import site_seal
+
+    def offline(url):
+        raise OSError(f"sem rede nos testes: {url}")
+
+    site_seal.clear_cache()
+    monkeypatch.setattr(site_seal, "_load", offline)
+    yield
+    site_seal.clear_cache()
+
+
 @pytest.fixture
 def car():
     return make_car
