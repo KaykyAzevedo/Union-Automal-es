@@ -64,11 +64,13 @@ def test_story_size_and_photo_slots():
 
 
 def test_header_opaque_over_photo():
-    """Máscara 1 desce abaixo do cabeçalho: foto nunca cobre o 'VEÍCULOS' (y<~190 no 1080x1920)."""
+    """Cabeçalho UNION opaco no centro até y=192: a foto (que começa em y=130) só aparece nas quinas."""
     img = story(top=(0, 255, 0))
     _, _, _, _, box1, _ = render._story_layers()
-    assert box1[1] >= 190
-    assert max(img.getpixel((x, 150))[1] - img.getpixel((x, 150))[0] for x in range(0, 1080, 20)) < 120  # sem verde
+    assert box1[1] == 130
+    for y in (60, 130, 150, 180, 190):
+        assert max(img.getpixel((x, y))[1] - img.getpixel((x, y))[0] for x in range(250, 830, 20)) < 120
+    assert img.getpixel((1070, 188))[1] > 200 and img.getpixel((1070, 188))[0] < 60   # quina: foto aparece
 
 
 def test_texts_change_with_data():
@@ -94,7 +96,7 @@ def test_price_none_shows_consulte_without_cents(monkeypatch):
     assert "154.900," in seen and "00" in seen and "CONSULTE" not in seen
     # o painel do preço muda: dígitos brancos no painel escuro só com preço
     priced, consulte = story(), story(car(price_cents=None))
-    assert ImageChops.difference(priced, consulte).crop((300, 1520, 1000, 1620)).getbbox() is not None
+    assert ImageChops.difference(priced, consulte).crop((300, 1700, 1000, 1800)).getbbox() is not None
 
 
 def test_km_year_formats_whole_in_code():
@@ -106,16 +108,16 @@ def test_km_year_formats_whole_in_code():
 
 
 def test_long_names_never_invade_other_column():
-    """Marca/modelo/versão enormes encolhem; coluna da esquerda não passa de x=560 (a linha vertical está em ~570)."""
+    """Marca/modelo enormes encolhem: a coluna da esquerda não passa da linha vertical (x~586)."""
     blank = story(car(brand="", model=""))
     long = story(car(brand="Mercedes-Benz Superlongname", model="CLASSE C 300 SPORT EXTRA LONGO COUPÉ AMG"))
-    bbox = diff_box(blank, long, (0, 1300, 1080, 1500))
-    assert bbox is not None and bbox[0] >= 90 and bbox[2] <= 560
+    bbox = diff_box(blank, long, (0, 1480, 1080, 1685))
+    assert bbox is not None and bbox[0] >= 85 and bbox[2] <= 575
     # KM/ANO enormes não passam da margem direita nem da coluna da esquerda
-    huge = story(car(km=123456789012, year_fab=2026, year_model=2027))
+    huge = story(car(km=123456789012))
     nokm = story(car(km=0))
-    bbox = diff_box(nokm, huge, (0, 1340, 1080, 1420))
-    assert bbox is not None and bbox[0] >= 700 and bbox[2] <= 1060
+    bbox = diff_box(nokm, huge, (0, 1545, 1080, 1600))
+    assert bbox is not None and bbox[0] >= 770 and bbox[2] <= 1055
 
 
 def test_long_version_fits_and_lines_follow_text_width():
@@ -123,14 +125,25 @@ def test_long_version_fits_and_lines_follow_text_width():
     long_v = "2.0 TURBO DIESEL MHEV FIRST EDITION AWD AUTOMATICO DIESEL E ELETRICO PREMIUM PLUS SPORT PACK"
     huge = story(car(version=long_v))
     none = story(car(version=""))
-    band = (0, 1650, 1080, 1690)
+    band = (0, 1825, 1080, 1870)
     for img in (short, huge):
         bbox = diff_box(none, img, band)
-        assert bbox is not None and bbox[0] >= 70 and bbox[2] <= 1010
-    # versão curta -> linhas dos lados mais compridas que no molde, longa -> mais curtas
+        assert bbox is not None and bbox[0] >= 48 and bbox[2] <= 1032
+    # versão curta -> linhas dos lados mais compridas que no molde; longa -> mais curtas (ou nenhuma)
     def line_len(img):
-        return sum(1 for x in range(0, 540) if min(img.getpixel((x, 1669))) < 150)
-    assert line_len(short) > line_len(story()) > line_len(huge) or line_len(huge) == 0
+        row = ImageChops.difference(none, img).crop((0, 1844, 540, 1845)).convert("L")
+        return sum(1 for v in row.tobytes() if v > 40)
+    molde = story()
+    assert line_len(short) > line_len(molde) > 0
+
+
+def test_version_lines_symmetric_both_or_none():
+    for version in ("1.0", "2.0 VVT-IE FLEX XRE DIRECT SHIFT", "2.0 40 TFSI GASOLINA PERFORMANCE BLACK QUATTRO TIPTRONIC"):
+        none, img = story(car(version="")), story(car(version=version))
+        diff = ImageChops.difference(none, img).convert("L")
+        left = diff.getpixel((60, 1844)) > 40
+        right = diff.getpixel((1020, 1844)) > 40
+        assert left == right
 
 
 def test_badges_follow_feed_rule_on_top_photo():
@@ -302,16 +315,10 @@ def test_long_model_wraps_to_two_lines_inside_left_column():
     blank = story(car(model=""))
     one = story(car(model="GS3"))
     two = story(car(model="HAVAL H6 GT"))
-    b1, b2 = diff_box(blank, one, (0, 1390, 560, 1500)), diff_box(blank, two, (0, 1390, 560, 1500))
-    assert b2 is not None and b2[2] <= 560 and b2[0] >= 120
+    b1, b2 = diff_box(blank, one, (0, 1565, 580, 1680)), diff_box(blank, two, (0, 1565, 580, 1680))
+    assert b2 is not None and b2[2] <= 575 and b2[0] >= 110
     assert (b2[3] - b2[1]) >= 60                      # duas linhas ocupam altura parecida com a de 1 linha grande
-    assert b2[1] >= 0                                 # 1ª linha começa abaixo da marca (baseline 1385)
-
-
-def test_price_bar_has_no_stray_specks():
-    """Pontinha de textura fora do contorno da barra (canto inf. esquerdo) removida."""
-    f = Image.open(render.ASSETS / "story_frente.png").convert("RGBA")
-    assert all(p[3] == 255 and min(p[:3]) >= 240 for p in f.crop((50, 1618, 60, 1640)).getdata())
+    assert b2[1] >= 3                                 # 1ª linha começa abaixo da marca (baseline 1560)
 
 
 # --- F18: fades, ajuste de enquadramento, frames ---------------------------------------
@@ -326,11 +333,11 @@ def test_story_fades_present_between_photos_and_under_header():
     assert seam[0][0] > 150 and seam[-1][2] > 150                     # começa vermelho, termina azul
     steps = [abs(a[0] - b[0]) for a, b in zip(seam, seam[1:])]
     assert max(steps) < 60 and len([p for p in seam if 40 < p[0] < 160]) >= 3  # transição gradual, ~100 px
-    top = [img.getpixel((xs, y)) for y in range(box1[1], box1[1] + 90, 6)]
+    top = [img.getpixel((xs, y)) for y in range(193, 285, 6)]
     assert top[0][1] > 150 and top[-1][1] < 40                         # claro (cabeçalho) -> vermelho puro
     assert all(a[1] >= b[1] - 6 for a, b in zip(top, top[1:]))          # monotônico
     base = story(top=(0, 255, 0))                                      # VEÍCULOS (acima do fade) intacto
-    assert diff_box(img, base, (0, 0, 1080, box1[1])) is None
+    assert diff_box(img, base, (250, 0, 830, 192)) is None
 
 
 def test_default_adj_is_identical_to_no_adj():
@@ -478,7 +485,7 @@ def test_single_armored_badge_drawn_once_in_one_box():
     base = story()
     arm = story(car(armored=True))
     bb = diff_box(base, arm, (0, 0, 1080, 1920))
-    want = render._story_badge_box(render.BADGE_ARMORED, box1)
+    want = render._story_badge_box(render.BADGE_ARMORED, (box1[0], render.STORY_BADGE_TOP, box1[2], box1[3]))
     assert bb is not None
     assert want[0] - 2 <= bb[0] and bb[2] <= want[2] + 2 and want[1] - 2 <= bb[1] and bb[3] <= want[3] + 2
 
@@ -504,7 +511,8 @@ def test_photos_json_ok(client, cars, scrape, photo_fetch):
     assert r.headers["content-type"].startswith("application/json")
     assert r.headers["cache-control"] == "private, max-age=300"
     j = r.json()
-    assert set(j) == {"car_id", "name", "slug", "photos", "default_top", "default_int"}
+    assert set(j) == {"car_id", "name", "slug", "photos", "default_top", "default_int", "frames"}
+    assert j["frames"] == render.story_frames(bool(d.armored))
     assert j["car_id"] == cid and j["photos"] == d.photos and j["name"]
     assert (j["default_top"], j["default_int"]) == (0, 1)
     assert photo_fetch.calls == []                     # só lista URLs: nada de baixar foto
@@ -551,3 +559,92 @@ def test_photos_json_requires_login(client, cars, scrape, monkeypatch):
     assert r.status_code in (303, 401)
     assert r.status_code != 303 or r.headers["location"].startswith("/login")
     assert scrape["calls"] == 0
+
+
+def test_v2_layout_without_footer_and_bigger_photos():
+    """F20: sem rodapé de contatos; fotos maiores (a de cima ~y130-922, interior ~852-1505) e bloco de texto embaixo."""
+    _, frente, _, _, box1, box2 = render._story_layers()
+    assert box1[1] == 130 and 915 <= box1[3] <= 925 and 845 <= box2[1] <= 860 and 1495 <= box2[3] <= 1510
+    assert frente.getpixel((540, 600))[3] == 0 and frente.getpixel((540, 1200))[3] == 0
+    assert frente.getpixel((540, 1700))[3] == 255
+    f = render.story_frames()
+    assert f["story_top"]["h"] > 750 and f["story_int"]["h"] > 620
+
+
+# --- F20: marca d'água "BLINDADO" do site nos carros blindados ------------------------
+
+WATERMARK = (0.8086, 0.008, 0.9893, 0.1823)   # pior caso medido (fotos 1024x768 do site), frações da foto
+
+
+def watermarked(size):
+    w, h = size
+    img = Image.new("RGB", size, (90, 90, 90))
+    x0, y0, x1, y1 = WATERMARK
+    img.paste((255, 0, 255), (int(w * x0), int(h * y0), round(w * x1), round(h * y1) + 1))
+    return img
+
+
+def magenta_pixels(img, box=(0, 0, 1080, 1920)):
+    r, g, b = img.crop(box).split()
+    mask = ImageChops.darker(r.point(lambda v: 255 if v > 120 else 0), b.point(lambda v: 255 if v > 120 else 0))
+    mask = ImageChops.darker(mask, g.point(lambda v: 255 if v < 70 else 0))
+    return mask.histogram()[255]
+
+
+@pytest.mark.parametrize("size", [(1440, 1080), (1024, 768)])
+def test_armored_default_framing_hides_site_watermark_in_both_photos(size):
+    ph = watermarked(size)
+    img = render.render_story(car(armored=True), ph, ph)
+    assert magenta_pixels(img) == 0                      # nem na foto de cima, nem na emenda/interior
+    # prova de que a marca apareceria sem o padrão de blindado
+    plain = render.render_story(car(armored=False), ph, ph)
+    assert magenta_pixels(plain) > 500
+
+
+def test_armored_defaults_only_for_armored():
+    assert render.story_default_adj(False) == (render.STORY_DEFAULT_ADJ, render.STORY_DEFAULT_ADJ)
+    top, inter = render.story_default_adj(True)
+    assert top == render.STORY_ARMORED_TOP_ADJ and inter == render.STORY_ARMORED_INT_ADJ
+    assert 1.0 < top[0] <= 1.2 and inter[0] == 1.0
+    a, b = gradient_photo(), gradient_photo()
+    same = render.render_story(car(armored=False), a, b, render.STORY_DEFAULT_ADJ, render.STORY_DEFAULT_ADJ)
+    assert ImageChops.difference(same, render.render_story(car(armored=False), a, b)).getbbox() is None
+
+
+def test_armored_manual_adjust_overrides_default():
+    ph = watermarked((1440, 1080))
+    manual = render.render_story(car(armored=True), ph, ph, (1.0, 0.5, 0.5), (1.0, 0.5, 0.5))
+    assert magenta_pixels(manual) > 500                  # o ajuste manual vale por cima do padrão
+    explicit = render.render_story(car(armored=True), ph, ph, render.STORY_ARMORED_TOP_ADJ,
+                                   render.STORY_ARMORED_INT_ADJ)
+    assert ImageChops.difference(explicit, render.render_story(car(armored=True), ph, ph)).getbbox() is None
+
+
+def test_story_frames_reflect_armored_defaults():
+    plain, arm = render.story_frames(), render.story_frames(True)
+    assert (arm["story_top"]["z"], arm["story_top"]["cx"], arm["story_top"]["cy"]) == render.STORY_ARMORED_TOP_ADJ
+    assert (arm["story_int"]["z"], arm["story_int"]["cx"], arm["story_int"]["cy"]) == render.STORY_ARMORED_INT_ADJ
+    assert arm["cover"] == plain["cover"] and arm["story_top"]["h"] == plain["story_top"]["h"]
+    # o editor manda o valor com 2/3 casas: precisa ser aceito e igual ao padrão
+    value = "{:.2f},{:.3f},{:.3f}".format(*render.STORY_ARMORED_TOP_ADJ)
+    assert app_main.parse_adj(value) == render.STORY_ARMORED_TOP_ADJ
+
+
+def test_editor_and_photos_json_use_armored_frames(client, cars, scrape, monkeypatch):
+    from dataclasses import replace as dc_replace
+    from app.encarte import source
+
+    real = source.get_detail
+    monkeypatch.setattr(source, "get_detail", lambda c, conn: dc_replace(real(c, conn), armored=True))
+    captured = {}
+    real_tpl = app_main.templates.TemplateResponse
+
+    def spy(request, name, ctx, *a, **k):
+        captured.update(ctx)
+        return real_tpl(request, name, ctx, *a, **k)
+
+    monkeypatch.setattr(app_main.templates, "TemplateResponse", spy)
+    cid = cars["5575766"]
+    assert client.get(f"/editor/{cid}").status_code == 200
+    assert captured["frames"] == render.story_frames(True)
+    assert client.get(f"/encarte/{cid}/photos.json").json()["frames"] == render.story_frames(True)

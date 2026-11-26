@@ -539,6 +539,7 @@ def editor_car(request: Request, car_id: int, conn=Depends(db.get_conn)):
         log.warning("editor car=%s: scrape_detail falhou: %s", car.id, exc)
         ctx["error"] = f"Não foi possível ler o anúncio no site: {exc}"
     else:
+        ctx["frames"] = story_frames(bool(getattr(detail, "armored", False)))  # padrão do Stories por carro
         ctx["selected"] = {
             "car": car,
             "detail": detail,
@@ -590,7 +591,8 @@ def encarte_photos(car_id: int, conn=Depends(db.get_conn)):
         raise HTTPException(422, "Anúncio sem fotos")
     return JSONResponse(
         {"car_id": car.id, "name": car.name, "slug": story_slug(detail), "photos": list(detail.photos),
-         "default_top": 0, "default_int": 1 if len(detail.photos) > 1 else 0},
+         "default_top": 0, "default_int": 1 if len(detail.photos) > 1 else 0,
+         "frames": story_frames(bool(getattr(detail, "armored", False)))},
         headers={"Cache-Control": "private, max-age=300"})
 
 

@@ -54,7 +54,7 @@ class StoryStyle:
 
 # O molde do Stories é um itálico pesado e largo, de dígitos "retangulares arredondados" (0, 4, 5);
 # a Saira itálica bate com isso melhor que a Montserrat Black Italic (testada: 0 e 4 redondos, e muito
-# mais estreita que o molde). Larguras calibradas contra docs/referencia/stories/story_exemplo_gs3.png
+# mais estreita que o molde). Larguras calibradas contra docs/referencia/stories/story_exemplo_v2.jpg
 # (ver docs/referencia/stories/calibrar.py).
 STORY_FONTS: dict[str, StoryStyle] = {
     "story_brand":   StoryStyle(weight=900, width=125, stretch=1.286),
@@ -62,7 +62,7 @@ STORY_FONTS: dict[str, StoryStyle] = {
     "story_value":   StoryStyle(weight=700, width=102, stretch=1.012),
     "story_price":   StoryStyle(weight=800, width=98, stretch=1.034),
     "story_cents":   StoryStyle(weight=800, width=111, stretch=1.023),
-    "story_version": StoryStyle(weight=500, width=109, stretch=1.02),
+    "story_version": StoryStyle(weight=500, width=109, stretch=1.044),
 }
 
 

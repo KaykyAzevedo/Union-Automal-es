@@ -97,6 +97,18 @@ Adj = tuple  # (z, cx, cy)
 ADJ_ZOOM_RANGE = (1.0, 3.0)
 COVER_DEFAULT_ADJ = (COVER_ZOOM, *COVER_CENTERING)
 STORY_DEFAULT_ADJ = (1.0, 0.5, 0.5)
+# Fotos de blindados do site trazem a marca d'água "BLINDADO" no canto sup. direito. Medida em 140
+# fotos de 12 blindados: x >= 0,864 e y <= 0,130 da foto (1440x1080) e, no pior caso (1024x768),
+# x >= 0,809 e y <= 0,182. O padrão abaixo tira a marca cortando o topo (base alinhada, cy=1): na
+# foto de cima, o menor zoom que a deixa toda atrás do cabeçalho; no interior, sem zoom (a caixa
+# já é mais larga que a foto). Ajuste manual continua valendo por cima.
+STORY_ARMORED_TOP_ADJ = (1.16, 0.5, 1.0)
+STORY_ARMORED_INT_ADJ = (1.0, 0.5, 1.0)
+
+
+def story_default_adj(armored: bool) -> tuple[tuple, tuple]:
+    """(padrão da foto de cima, padrão do interior) do Stories para o carro."""
+    return (STORY_ARMORED_TOP_ADJ, STORY_ARMORED_INT_ADJ) if armored else (STORY_DEFAULT_ADJ, STORY_DEFAULT_ADJ)
 
 
 def norm_adj(adj, default: tuple) -> tuple:
@@ -323,25 +335,26 @@ def build_post(detail, photo_urls: list[str]) -> list[bytes]:
 
 
 # ---- Stories (Instagram 9:16, 1080x1920) ---------------------------------------
-# Camadas geradas por docs/referencia/stories/build_assets.py a partir do molde
-# docs/referencia/stories/story_exemplo_gs3.png (941x1672, escalado para 1080x1920).
-# Posições medidas por pixel nesse molde escalado. Textos ancorados na LINHA DE BASE
-# (cap = altura da caixa-alta em px), para encolher sem subir/descer.
+# Layout v2 (F20). Camadas geradas por docs/referencia/stories/build_assets.py; posições medidas
+# por pixel em docs/referencia/stories/story_exemplo_v2.jpg escalada para 1080x1920. Textos
+# ancorados na LINHA DE BASE (cap = altura da caixa-alta em px), para encolher sem subir/descer.
 STORY_SIZE = (1080, 1920)
 STORY_MIN_SHRINK = 0.45  # encolhe até esta fração do tamanho do molde; depois abrevia com "…"
 STORY_MIN_SHRINK_BY_STYLE = {"story_brand": 0.2}  # marca nunca é abreviada: piso bem menor
 
-STORY_BRAND = dict(style="story_brand", cap=65, baseline=1385, left=98, max_w=442,
+STORY_BRAND = dict(style="story_brand", cap=58, baseline=1560, left=90, max_w=472,
                    gradient=((232, 10, 16), (105, 0, 2)))
-STORY_MODEL = dict(style="story_model", cap=87, baseline=1476, left=131, max_w=409, color=(20, 20, 23))
-STORY_MODEL_2L = dict(cap=36, gap=10, min_shrink=0.5)  # modelo longo em 2 linhas (antes de encolher/abreviar)
-STORY_KM = dict(style="story_value", cap=27, baseline=1402, left=779, max_w=261, color=(18, 18, 20))
-STORY_YEAR = dict(style="story_value", cap=27, baseline=1469, left=771, max_w=269, color=(18, 18, 20))
-STORY_VERSION = dict(style="story_version", cap=25, baseline=1682, center_x=540, max_w=812, color=(40, 38, 44))
-STORY_VERSION_LINE = dict(y=1668, thickness=4, x0=75, x1=1005, gap=19, color=(84, 83, 89), min_len=36)
-STORY_PRICE = dict(style="story_price", cap=88, baseline=1610, center_x=638, max_w=665, color=(255, 255, 255))
-STORY_CENTS = dict(style="story_cents", cap_ratio=0.489, raise_ratio=15 / 88, gap_ratio=14 / 88)
-STORY_CONSULT = dict(style="story_price", cap=76, baseline=1604, center_x=638, max_w=665, color=(255, 255, 255))
+# modelo: 1 linha grande se for curto; nomes compostos vão em 2 linhas (como "COROLLA / CROSS")
+STORY_MODEL = dict(style="story_model", cap=82, baseline=1663, left=118, max_w=442, color=(20, 20, 23))
+STORY_MODEL_2L = dict(cap=40, gap=9, min_shrink=0.5)
+STORY_KM = dict(style="story_value", cap=26, baseline=1589, left=780, max_w=270, color=(18, 18, 20))
+STORY_YEAR = dict(style="story_value", cap=26, baseline=1652, left=772, max_w=278, color=(18, 18, 20))
+STORY_VERSION = dict(style="story_version", cap=25, baseline=1857, center_x=540, max_w=850, color=(30, 28, 33))
+STORY_VERSION_LINE = dict(y=1843, thickness=4, x0=51, x1=1029, gap=20, color=(60, 59, 64), min_len=36)
+STORY_PRICE = dict(style="story_price", cap=89, baseline=1793, center_x=638, max_w=680, color=(255, 255, 255))
+STORY_CENTS = dict(style="story_cents", cap_ratio=46 / 89, raise_ratio=13 / 89, gap_ratio=13 / 89)
+STORY_CONSULT = dict(style="story_price", cap=78, baseline=1788, center_x=638, max_w=665, color=(255, 255, 255))
+STORY_BADGE_TOP = 166  # origem vertical dos selos (referência: escudo começa em y~182)
 
 
 @lru_cache(maxsize=1)
@@ -400,7 +413,7 @@ def _story_model(img: Image.Image, text: str) -> None:
     M, L2 = STORY_MODEL, STORY_MODEL_2L
     if not text:
         return
-    if _fits(text, M["style"], M["cap"], M["max_w"], 0.6) is None:
+    if _fits(text, M["style"], M["cap"], M["max_w"], 0.75) is None:
         words = text.split()
         best = None
         for i in range(1, len(words)):
@@ -513,16 +526,17 @@ def _paste_story_badges(img: Image.Image, detail, slot: tuple) -> Image.Image:
     return out.convert("RGB")
 
 
-def story_frames() -> dict:
-    """Caixas das fotos (px) e enquadramento padrão, para o editor montar a prévia local."""
+def story_frames(armored: bool = False) -> dict:
+    """Caixas das fotos (px) e enquadramento padrão DO CARRO, para o editor montar a prévia local."""
     _, _, _, _, box1, box2 = _story_layers()
     cx0, cy0, cx1, cy1 = COVER_PHOTO_BOX
 
     def frame(w, h, adj):
         return {"w": w, "h": h, "z": adj[0], "cx": adj[1], "cy": adj[2]}
 
-    return {"story_top": frame(box1[2] - box1[0], box1[3] - box1[1], STORY_DEFAULT_ADJ),
-            "story_int": frame(box2[2] - box2[0], box2[3] - box2[1], STORY_DEFAULT_ADJ),
+    top_adj, int_adj = story_default_adj(armored)
+    return {"story_top": frame(box1[2] - box1[0], box1[3] - box1[1], top_adj),
+            "story_int": frame(box2[2] - box2[0], box2[3] - box2[1], int_adj),
             "cover": frame(cx1 - cx0, cy1 - cy0, COVER_DEFAULT_ADJ)}
 
 
@@ -531,14 +545,16 @@ def render_story(detail, photo_top: Image.Image, photo_interior: Image.Image, ad
     As duas fotos se fundem em degradê e o topo da foto 1 some em degradê sob o cabeçalho (assets)."""
     fundo, frente, m1, m2, box1, box2 = _story_layers()
     img = fundo.copy()
-    for photo, mask, box, adj in ((photo_top, m1, box1, adj_top), (photo_interior, m2, box2, adj_int)):
+    def_top, def_int = story_default_adj(bool(getattr(detail, "armored", False)))
+    for photo, mask, box, adj, default in ((photo_top, m1, box1, adj_top, def_top),
+                                           (photo_interior, m2, box2, adj_int, def_int)):
         x0, y0, x1, y1 = box
-        z, cx, cy = norm_adj(adj, STORY_DEFAULT_ADJ)
+        z, cx, cy = norm_adj(adj, default)
         layer = Image.new("RGB", STORY_SIZE, (0, 0, 0))
         layer.paste(cover_fit(photo, (x1 - x0, y1 - y0), z, (cx, cy)), (x0, y0))
         img.paste(layer, (0, 0), mask)
     img = Image.alpha_composite(img.convert("RGBA"), frente).convert("RGB")
-    img = _paste_story_badges(img, detail, box1)
+    img = _paste_story_badges(img, detail, (box1[0], STORY_BADGE_TOP, box1[2], box1[3]))
 
     _story_brand(img, fmt_brand(detail.brand))
     _story_model(img, " ".join((detail.model or "").upper().split()))
@@ -560,7 +576,8 @@ def story_png(detail, url_top: str, url_interior: str, adj_top=None, adj_int=Non
     """PNG do Stories, com cache LRU em memória (chave: fotos + textos que entram na arte)."""
     from .photos import load_photo
 
-    adj_top, adj_int = norm_adj(adj_top, STORY_DEFAULT_ADJ), norm_adj(adj_int, STORY_DEFAULT_ADJ)
+    def_top, def_int = story_default_adj(bool(getattr(detail, "armored", False)))
+    adj_top, adj_int = norm_adj(adj_top, def_top), norm_adj(adj_int, def_int)
     key = (url_top, url_interior, adj_top, adj_int, detail.brand, detail.model, detail.version, detail.year_fab,
            detail.year_model, detail.km, detail.price_cents, tuple(n for n, _ in cover_badges(detail)))
     with _story_lock:

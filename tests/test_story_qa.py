@@ -90,8 +90,8 @@ def test_brand_never_ellipsis_and_stays_in_column(monkeypatch, brand):
     from PIL import ImageChops
     blank = render.render_story(car(brand="", model="CLA 200"), Image.new("RGB", (400, 300), (90, 90, 90)),
                                 Image.new("RGB", (400, 300), (90, 90, 90)))
-    bb = ImageChops.difference(blank, img).crop((0, 1300, 1080, 1500)).getbbox()
-    assert bb and bb[2] <= 560 and bb[1] + 1300 >= 1315 and bb[3] + 1300 <= 1400   # só na faixa da marca
+    bb = ImageChops.difference(blank, img).crop((0, 1470, 1080, 1700)).getbbox()
+    assert bb and bb[2] <= 575 and bb[1] + 1470 >= 1485 and bb[3] + 1470 <= 1580   # só na faixa da marca
 
 
 @pytest.mark.parametrize("model", ["CLA 200", "CLA 200 PROGRESSIVE", "ROYCE GHOST SERIES II", "GRAND CHEROKEE LIMITED"])
